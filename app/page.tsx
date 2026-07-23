@@ -10,6 +10,50 @@ type WalkthroughResponse = {
   images?: string[];
 };
 
+type PropertyPhotoAnalysis = {
+  photoNumber: number;
+  category: string;
+  qualityScore: number;
+  storytellingScore: number;
+  distortionRisk: "low" | "medium" | "high";
+  decision: "keep" | "skip";
+  storyRole: string;
+  reason: string;
+  duplicateOf: number;
+  visibleFeatures: string[];
+};
+
+type PropertyBrainAnalysis = {
+  propertyType: string;
+  overallQualityScore: number;
+  propertySummary: string;
+  propertyMemory: {
+    exterior: string;
+    frontDoor: string;
+    roof: string;
+    windows: string;
+    kitchen: string;
+    flooring: string;
+    fireplace: string;
+    landscaping: string;
+    standoutFeatures: string[];
+  };
+  recommendedSequence: number[];
+  photos: PropertyPhotoAnalysis[];
+  skippedSummary: Array<{
+    photoNumber: number;
+    reason: string;
+  }>;
+  directorNotes: string[];
+};
+
+type PropertyBrainResponse = {
+  success?: boolean;
+  message?: string;
+  imageCount?: number;
+  analysis?: PropertyBrainAnalysis;
+};
+
 type ClipResponse = {
   success?: boolean;
   message?: string;
@@ -33,6 +77,11 @@ export default function Home() {
   const [listingUrl, setListingUrl] = useState("");
   const [message, setMessage] = useState("");
   const [images, setImages] = useState<string[]>([]);
+  const [selectedPhotoNumbers, setSelectedPhotoNumbers] = useState<number[]>([]);
+  const [propertyAnalysis, setPropertyAnalysis] =
+    useState<PropertyBrainAnalysis | null>(null);
+  const [isAnalyzingProperty, setIsAnalyzingProperty] = useState(false);
+  const [analysisMessage, setAnalysisMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [isGeneratingClip, setIsGeneratingClip] = useState(false);
@@ -53,6 +102,9 @@ export default function Home() {
 
     setMessage("");
     setImages([]);
+    setSelectedPhotoNumbers([]);
+    setPropertyAnalysis(null);
+    setAnalysisMessage("");
     setClipMessage("");
     setGeneratedClips([]);
     setFailedClips([]);
@@ -89,6 +141,13 @@ export default function Home() {
         : [];
 
       setImages(extractedImages);
+      setSelectedPhotoNumbers(
+        extractedImages.slice(0, 15).map((_, index) => index + 1)
+      );
+
+      if (extractedImages.length > 0) {
+        void analyzeProperty(extractedImages);
+      }
 
       setMessage(
         `Found ${
@@ -102,6 +161,137 @@ export default function Home() {
       setMessage("Could not connect to the WalkNWow server.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  const selectedPhotos = selectedPhotoNumbers
+    .map((photoNumber) => ({
+      imageUrl: images[photoNumber - 1],
+      photoNumber,
+    }))
+    .filter(
+      (photo): photo is {
+        imageUrl: string;
+        photoNumber: number;
+      } => Boolean(photo.imageUrl)
+    );
+
+  function togglePhotoSelection(photoNumber: number) {
+    if (isGeneratingAll || isGeneratingClip) {
+      return;
+    }
+
+    setSelectedPhotoNumbers((current) =>
+      current.includes(photoNumber)
+        ? current.filter((number) => number !== photoNumber)
+        : [...current, photoNumber].sort((a, b) => a - b)
+    );
+  }
+
+  function selectFirstFifteen() {
+    setSelectedPhotoNumbers(
+      images.slice(0, 15).map((_, index) => index + 1)
+    );
+  }
+
+  function selectAllPhotos() {
+    setSelectedPhotoNumbers(
+      images.map((_, index) => index + 1)
+    );
+  }
+
+  function clearPhotoSelection() {
+    setSelectedPhotoNumbers([]);
+  }
+
+  async function analyzeProperty(
+    imagesToAnalyze: string[] = images
+  ) {
+    if (imagesToAnalyze.length === 0 || isAnalyzingProperty) {
+      return;
+    }
+
+    setIsAnalyzingProperty(true);
+    setAnalysisMessage(
+      `Property Brain is analyzing ${imagesToAnalyze.length} photos...`
+    );
+    setPropertyAnalysis(null);
+
+    try {
+      const response = await fetch(
+        "/api/walkthroughs/property-brain",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            images: imagesToAnalyze,
+          }),
+        }
+      );
+
+      const rawResponse = await response.text();
+
+      console.log("========== PROPERTY BRAIN RESPONSE ==========");
+      console.log(rawResponse);
+      console.log("=============================================");
+
+      let data: PropertyBrainResponse;
+
+      try {
+        data = JSON.parse(rawResponse) as PropertyBrainResponse;
+      } catch {
+        throw new Error(
+          "Property Brain server did not return valid JSON. Check the Terminal for the real error."
+        );
+      }
+
+      if (!response.ok || !data.success || !data.analysis) {
+        throw new Error(
+          data.message ?? "Property Brain could not analyze this listing."
+        );
+      }
+
+      const validRecommendedSequence =
+        Array.isArray(data.analysis.recommendedSequence)
+          ? data.analysis.recommendedSequence.filter(
+              (photoNumber) =>
+                Number.isInteger(photoNumber) &&
+                photoNumber >= 1 &&
+                photoNumber <= imagesToAnalyze.length
+            )
+          : [];
+
+      const cleanedAnalysis: PropertyBrainAnalysis = {
+        ...data.analysis,
+        recommendedSequence: validRecommendedSequence,
+        photos: Array.isArray(data.analysis.photos)
+          ? data.analysis.photos
+          : [],
+        skippedSummary: Array.isArray(data.analysis.skippedSummary)
+          ? data.analysis.skippedSummary
+          : [],
+        directorNotes: Array.isArray(data.analysis.directorNotes)
+          ? data.analysis.directorNotes
+          : [],
+      };
+
+      setPropertyAnalysis(cleanedAnalysis);
+      setSelectedPhotoNumbers(validRecommendedSequence);
+      setAnalysisMessage(
+        `Property Brain selected ${validRecommendedSequence.length} of ${imagesToAnalyze.length} photos.`
+      );
+    } catch (error) {
+      console.error("Property Brain analysis failed:", error);
+
+      setAnalysisMessage(
+        error instanceof Error
+          ? error.message
+          : "Property Brain could not analyze this listing."
+      );
+    } finally {
+      setIsAnalyzingProperty(false);
     }
   }
 
@@ -202,7 +392,8 @@ export default function Home() {
   }
 
   async function generateAllClips() {
-    if (images.length === 0 || isGeneratingAll) {
+    if (selectedPhotos.length === 0 || isGeneratingAll) {
+      setClipMessage("Choose at least one Director Pick first.");
       return;
     }
 
@@ -212,19 +403,18 @@ export default function Home() {
     setGeneratedClips([]);
     setFailedClips([]);
     setCurrentClipNumber(0);
-    setTotalClipCount(images.length);
+    setTotalClipCount(selectedPhotos.length);
 
     let successfulCount = 0;
     let failedCount = 0;
 
-    for (let index = 0; index < images.length; index++) {
-      const imageUrl = images[index];
-      const photoNumber = index + 1;
+    for (let index = 0; index < selectedPhotos.length; index++) {
+      const { imageUrl, photoNumber } = selectedPhotos[index];
 
       setCurrentClipNumber(photoNumber);
       setGeneratingImageUrl(imageUrl);
       setClipMessage(
-        `Generating clip ${photoNumber} of ${images.length}...`
+        `Generating Director Pick ${index + 1} of ${selectedPhotos.length} (Photo ${photoNumber})...`
       );
 
       try {
@@ -273,11 +463,11 @@ export default function Home() {
     }
 
     setGeneratingImageUrl("");
-    setCurrentClipNumber(images.length);
+    setCurrentClipNumber(selectedPhotos.length);
     setClipMessage(
       `Finished! Generated ${successfulCount} of ${
-        images.length
-      } clips.${
+        selectedPhotos.length
+      } Director Pick clips.${
         failedCount > 0
           ? ` ${failedCount} clip${
               failedCount === 1 ? "" : "s"
@@ -346,6 +536,7 @@ export default function Home() {
                 type="submit"
                 disabled={
                   isSubmitting ||
+                  isAnalyzingProperty ||
                   isGeneratingAll ||
                   isGeneratingClip
                 }
@@ -379,27 +570,196 @@ export default function Home() {
                   </h2>
 
                   <p className="mt-1 text-sm text-white/50">
-                    Generate one cinematic clip for every extracted
-                    property photo.
+                    Property Brain selects the strongest shots, removes
+                    duplicates, and builds the recommended story order.
                   </p>
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-center text-sm text-cyan-200">
-                    {images.length} photos
-                  </span>
+                <div className="flex flex-col gap-3 sm:items-end">
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <span className="rounded-full border border-white/15 bg-white/[0.04] px-4 py-2 text-center text-sm text-white/60">
+                      {images.length} found
+                    </span>
+
+                    <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-center text-sm text-cyan-200">
+                      {selectedPhotoNumbers.length} Director Picks
+                    </span>
+                  </div>
 
                   <button
                     type="button"
                     onClick={generateAllClips}
-                    disabled={isGeneratingAll || isGeneratingClip}
+                    disabled={
+                      isAnalyzingProperty ||
+                      isGeneratingAll ||
+                      isGeneratingClip ||
+                      selectedPhotoNumbers.length === 0
+                    }
                     className="rounded-xl bg-white px-5 py-3 font-semibold text-black transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isGeneratingAll
                       ? `Generating ${currentClipNumber} of ${totalClipCount}...`
-                      : `Generate all ${images.length} clips`}
+                      : `Generate ${selectedPhotoNumbers.length} Director Picks`}
                   </button>
                 </div>
+              </div>
+
+              <div className="mb-8 rounded-3xl border border-cyan-400/20 bg-cyan-400/[0.06] p-6">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="max-w-3xl">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h3 className="text-xl font-semibold">
+                        🧠 Property Brain
+                      </h3>
+
+                      {propertyAnalysis && (
+                        <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-sm text-cyan-100">
+                          {propertyAnalysis.overallQualityScore}/100 photo set
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="mt-2 text-sm leading-6 text-white/55">
+                      Property Brain analyzes the complete listing, removes
+                      duplicates and weak shots, flags distortion risks,
+                      and builds a human-style walkthrough sequence.
+                    </p>
+
+                    {analysisMessage && (
+                      <p className="mt-4 text-sm text-cyan-100">
+                        {analysisMessage}
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => analyzeProperty()}
+                    disabled={
+                      isAnalyzingProperty ||
+                      isGeneratingAll ||
+                      isGeneratingClip
+                    }
+                    className="rounded-xl bg-cyan-300 px-5 py-3 font-semibold text-black transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isAnalyzingProperty
+                      ? "Analyzing property..."
+                      : propertyAnalysis
+                        ? "Analyze again"
+                        : "Analyze property"}
+                  </button>
+                </div>
+
+                {propertyAnalysis && (
+                  <div className="mt-7 space-y-6">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-2xl border border-white/10 bg-black/30 p-5">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                          Property
+                        </p>
+                        <h4 className="mt-2 text-lg font-semibold">
+                          {propertyAnalysis.propertyType}
+                        </h4>
+                        <p className="mt-3 text-sm leading-6 text-white/55">
+                          {propertyAnalysis.propertySummary}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-black/30 p-5">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                          Director result
+                        </p>
+                        <p className="mt-2 text-3xl font-bold">
+                          {propertyAnalysis.recommendedSequence.length}
+                        </p>
+                        <p className="mt-1 text-sm text-white/55">
+                          recommended shots from {images.length} listing photos
+                        </p>
+                        <p className="mt-3 text-sm text-white/45">
+                          {propertyAnalysis.skippedSummary.length} weak,
+                          duplicate, risky, or redundant photos removed
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="font-semibold">
+                        Recommended walkthrough story
+                      </h4>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {propertyAnalysis.recommendedSequence.map(
+                          (photoNumber, storyIndex) => {
+                            const photoAnalysis =
+                              propertyAnalysis.photos.find(
+                                (photo) =>
+                                  photo.photoNumber === photoNumber
+                              );
+
+                            return (
+                              <button
+                                type="button"
+                                key={`${photoNumber}-${storyIndex}`}
+                                onClick={() =>
+                                  togglePhotoSelection(photoNumber)
+                                }
+                                className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-left text-sm text-cyan-100 transition hover:bg-cyan-300/20"
+                              >
+                                <span className="font-semibold">
+                                  {storyIndex + 1}. Photo {photoNumber}
+                                </span>
+                                <span className="ml-2 text-cyan-100/65">
+                                  {photoAnalysis?.storyRole ??
+                                    photoAnalysis?.category ??
+                                    "Recommended shot"}
+                                </span>
+                              </button>
+                            );
+                          }
+                        )}
+                      </div>
+                    </div>
+
+                    {propertyAnalysis.skippedSummary.length > 0 && (
+                      <div>
+                        <h4 className="font-semibold">
+                          Removed by Property Brain
+                        </h4>
+
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          {propertyAnalysis.skippedSummary.map(
+                            (skippedPhoto) => (
+                              <div
+                                key={skippedPhoto.photoNumber}
+                                className="rounded-xl border border-red-300/15 bg-red-300/[0.06] p-4"
+                              >
+                                <p className="font-semibold text-red-100">
+                                  Photo {skippedPhoto.photoNumber}
+                                </p>
+                                <p className="mt-1 text-sm leading-6 text-red-100/65">
+                                  {skippedPhoto.reason}
+                                </p>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {propertyAnalysis.directorNotes.length > 0 && (
+                      <div className="rounded-2xl border border-white/10 bg-black/30 p-5">
+                        <h4 className="font-semibold">Director notes</h4>
+                        <div className="mt-3 space-y-2 text-sm leading-6 text-white/55">
+                          {propertyAnalysis.directorNotes.map(
+                            (note, index) => (
+                              <p key={`${note}-${index}`}>• {note}</p>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {clipMessage && (
@@ -498,16 +858,51 @@ export default function Home() {
                     (clip) => clip.photoNumber === photoNumber
                   );
 
+                  const isSelected =
+                    selectedPhotoNumbers.includes(photoNumber);
+
+                  const photoAnalysis =
+                    propertyAnalysis?.photos.find(
+                      (photo) =>
+                        photo.photoNumber === photoNumber
+                    );
+
                   return (
                     <article
                       key={`${imageUrl}-${index}`}
-                      className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]"
+                      className={`overflow-hidden rounded-2xl border transition ${
+                        isSelected
+                          ? "border-cyan-300/70 bg-cyan-400/[0.08]"
+                          : "border-white/10 bg-white/[0.04] opacity-65"
+                      }`}
                     >
-                      <img
-                        src={imageUrl}
-                        alt={`Property photo ${photoNumber}`}
-                        className="aspect-[4/3] w-full object-cover"
-                      />
+                      <div className="relative">
+                        <img
+                          src={imageUrl}
+                          alt={`Property photo ${photoNumber}`}
+                          className="aspect-[4/3] w-full object-cover"
+                        />
+
+                        {photoAnalysis && (
+                          <div className="absolute left-3 top-3 flex flex-wrap gap-2">
+                            <span className="rounded-full bg-black/75 px-3 py-1 text-xs font-semibold text-white">
+                              {photoAnalysis.category.replaceAll("_", " ")}
+                            </span>
+
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                photoAnalysis.distortionRisk === "high"
+                                  ? "bg-red-500/90 text-white"
+                                  : photoAnalysis.distortionRisk === "medium"
+                                    ? "bg-amber-400/90 text-black"
+                                    : "bg-emerald-400/90 text-black"
+                              }`}
+                            >
+                              {photoAnalysis.distortionRisk} risk
+                            </span>
+                          </div>
+                        )}
+                      </div>
 
                       <div className="p-4">
                         <div className="mb-3 flex items-center justify-between">
@@ -521,6 +916,48 @@ export default function Home() {
                             </span>
                           )}
                         </div>
+
+                        {photoAnalysis && (
+                          <div className="mb-3 rounded-xl border border-white/10 bg-black/25 p-3 text-sm">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-white/55">
+                                Quality {photoAnalysis.qualityScore}/100
+                              </span>
+                              <span className="text-white/55">
+                                Story {photoAnalysis.storytellingScore}/100
+                              </span>
+                            </div>
+
+                            <p className="mt-2 leading-5 text-white/60">
+                              {photoAnalysis.reason}
+                            </p>
+
+                            {photoAnalysis.duplicateOf > 0 && (
+                              <p className="mt-2 text-red-200/80">
+                                Similar to Photo {photoAnalysis.duplicateOf}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            togglePhotoSelection(photoNumber)
+                          }
+                          disabled={
+                            isGeneratingClip || isGeneratingAll
+                          }
+                          className={`mb-3 block w-full rounded-xl border px-4 py-3 font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            isSelected
+                              ? "border-cyan-300/50 bg-cyan-300/10 text-cyan-200 hover:bg-cyan-300/20"
+                              : "border-white/15 text-white/65 hover:bg-white/10"
+                          }`}
+                        >
+                          {isSelected
+                            ? "✓ Included in walkthrough"
+                            : "Skipped — click to override"}
+                        </button>
 
                         <button
                           type="button"
@@ -570,8 +1007,8 @@ export default function Home() {
               },
               {
                 number: "02",
-                title: "Generate every clip",
-                text: "WalkNWow creates and saves one cinematic clip for each property photo.",
+                title: "Direct the story",
+                text: "Choose the strongest 12–15 shots and skip duplicates, risky close-ups, and weak angles.",
               },
               {
                 number: "03",
