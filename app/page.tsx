@@ -73,6 +73,14 @@ type FailedClip = {
   error: string;
 };
 
+type MergeResponse = {
+  success?: boolean;
+  message?: string;
+  clipCount?: number;
+  filename?: string;
+  videoUrl?: string;
+};
+
 export default function Home() {
   const [listingUrl, setListingUrl] = useState("");
   const [message, setMessage] = useState("");
@@ -97,6 +105,11 @@ export default function Home() {
   const [currentClipNumber, setCurrentClipNumber] = useState(0);
   const [totalClipCount, setTotalClipCount] = useState(0);
 
+  const [isMergingClips, setIsMergingClips] = useState(false);
+  const [mergeMessage, setMergeMessage] = useState("");
+  const [walkthroughUrl, setWalkthroughUrl] = useState("");
+  const [walkthroughFilename, setWalkthroughFilename] = useState("");
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -110,6 +123,10 @@ export default function Home() {
     setFailedClips([]);
     setCurrentClipNumber(0);
     setTotalClipCount(0);
+    setIsMergingClips(false);
+    setMergeMessage("");
+    setWalkthroughUrl("");
+    setWalkthroughFilename("");
 
     if (!listingUrl.trim()) {
       setMessage("Please paste a real estate listing link.");
@@ -177,7 +194,7 @@ export default function Home() {
     );
 
   function togglePhotoSelection(photoNumber: number) {
-    if (isGeneratingAll || isGeneratingClip) {
+    if (isGeneratingAll || isGeneratingClip || isMergingClips) {
       return;
     }
 
@@ -231,21 +248,8 @@ export default function Home() {
         }
       );
 
-      const rawResponse = await response.text();
-
-      console.log("========== PROPERTY BRAIN RESPONSE ==========");
-      console.log(rawResponse);
-      console.log("=============================================");
-
-      let data: PropertyBrainResponse;
-
-      try {
-        data = JSON.parse(rawResponse) as PropertyBrainResponse;
-      } catch {
-        throw new Error(
-          "Property Brain server did not return valid JSON. Check the Terminal for the real error."
-        );
-      }
+      const data =
+        (await response.json()) as PropertyBrainResponse;
 
       if (!response.ok || !data.success || !data.analysis) {
         throw new Error(
@@ -254,27 +258,16 @@ export default function Home() {
       }
 
       const validRecommendedSequence =
-        Array.isArray(data.analysis.recommendedSequence)
-          ? data.analysis.recommendedSequence.filter(
-              (photoNumber) =>
-                Number.isInteger(photoNumber) &&
-                photoNumber >= 1 &&
-                photoNumber <= imagesToAnalyze.length
-            )
-          : [];
+        data.analysis.recommendedSequence.filter(
+          (photoNumber) =>
+            Number.isInteger(photoNumber) &&
+            photoNumber >= 1 &&
+            photoNumber <= imagesToAnalyze.length
+        );
 
-      const cleanedAnalysis: PropertyBrainAnalysis = {
+      const cleanedAnalysis = {
         ...data.analysis,
         recommendedSequence: validRecommendedSequence,
-        photos: Array.isArray(data.analysis.photos)
-          ? data.analysis.photos
-          : [],
-        skippedSummary: Array.isArray(data.analysis.skippedSummary)
-          ? data.analysis.skippedSummary
-          : [],
-        directorNotes: Array.isArray(data.analysis.directorNotes)
-          ? data.analysis.directorNotes
-          : [],
       };
 
       setPropertyAnalysis(cleanedAnalysis);
@@ -331,6 +324,9 @@ export default function Home() {
     setClipMessage(
       `Generating cinematic clip for photo ${photoNumber}...`
     );
+    setMergeMessage("");
+    setWalkthroughUrl("");
+    setWalkthroughFilename("");
 
     try {
       const data = await requestClip(imageUrl);
@@ -404,6 +400,9 @@ export default function Home() {
     setFailedClips([]);
     setCurrentClipNumber(0);
     setTotalClipCount(selectedPhotos.length);
+    setMergeMessage("");
+    setWalkthroughUrl("");
+    setWalkthroughFilename("");
 
     let successfulCount = 0;
     let failedCount = 0;
@@ -478,6 +477,81 @@ export default function Home() {
     setIsGeneratingAll(false);
   }
 
+  async function mergeGeneratedClips() {
+    if (isMergingClips) {
+      return;
+    }
+
+    const clipsInStoryOrder = selectedPhotoNumbers
+      .map((photoNumber) =>
+        generatedClips.find(
+          (clip) => clip.photoNumber === photoNumber
+        )
+      )
+      .filter(
+        (clip): clip is GeneratedClip => Boolean(clip)
+      );
+
+    if (clipsInStoryOrder.length < 2) {
+      setMergeMessage(
+        "Generate at least two Director Pick clips before merging."
+      );
+      return;
+    }
+
+    setIsMergingClips(true);
+    setMergeMessage(
+      `Merging ${clipsInStoryOrder.length} clips into one walkthrough...`
+    );
+    setWalkthroughUrl("");
+    setWalkthroughFilename("");
+
+    try {
+      const response = await fetch(
+        "/api/walkthroughs/merge-clips",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            clips: clipsInStoryOrder.map(
+              (clip) => clip.videoUrl
+            ),
+          }),
+        }
+      );
+
+      const data = (await response.json()) as MergeResponse;
+
+      if (!response.ok || !data.success || !data.videoUrl) {
+        throw new Error(
+          data.message ?? "The walkthrough could not be merged."
+        );
+      }
+
+      setWalkthroughUrl(data.videoUrl);
+      setWalkthroughFilename(
+        data.filename ?? "walkthrough.mp4"
+      );
+      setMergeMessage(
+        `Walkthrough ready! Merged ${
+          data.clipCount ?? clipsInStoryOrder.length
+        } clips.`
+      );
+    } catch (error) {
+      console.error("Walkthrough merge failed:", error);
+
+      setMergeMessage(
+        error instanceof Error
+          ? error.message
+          : "The walkthrough could not be merged."
+      );
+    } finally {
+      setIsMergingClips(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-black text-white">
       <nav className="border-b border-white/10">
@@ -538,7 +612,8 @@ export default function Home() {
                   isSubmitting ||
                   isAnalyzingProperty ||
                   isGeneratingAll ||
-                  isGeneratingClip
+                  isGeneratingClip ||
+                  isMergingClips
                 }
                 className="min-h-14 rounded-2xl bg-white px-8 font-semibold text-black transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -593,6 +668,7 @@ export default function Home() {
                       isAnalyzingProperty ||
                       isGeneratingAll ||
                       isGeneratingClip ||
+                      isMergingClips ||
                       selectedPhotoNumbers.length === 0
                     }
                     className="rounded-xl bg-white px-5 py-3 font-semibold text-black transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
@@ -638,7 +714,8 @@ export default function Home() {
                     disabled={
                       isAnalyzingProperty ||
                       isGeneratingAll ||
-                      isGeneratingClip
+                      isGeneratingClip ||
+                      isMergingClips
                     }
                     className="rounded-xl bg-cyan-300 px-5 py-3 font-semibold text-black transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -788,6 +865,78 @@ export default function Home() {
                           ? ` • ${failedClips.length} failed`
                           : ""}
                       </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {generatedClips.length > 0 && (
+                <div className="mb-12 rounded-3xl border border-cyan-400/25 bg-cyan-400/[0.07] p-6">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">
+                        Final export
+                      </p>
+                      <h3 className="mt-2 text-2xl font-semibold">
+                        Build the complete walkthrough
+                      </h3>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-white/55">
+                        Merge the completed Director Pick clips in the
+                        recommended story order into one downloadable MP4.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={mergeGeneratedClips}
+                      disabled={
+                        isGeneratingAll ||
+                        isGeneratingClip ||
+                        isMergingClips ||
+                        generatedClips.length < 2
+                      }
+                      className="rounded-xl bg-cyan-300 px-6 py-3 font-semibold text-black transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isMergingClips
+                        ? "Merging walkthrough..."
+                        : `Merge ${generatedClips.length} clips`}
+                    </button>
+                  </div>
+
+                  {mergeMessage && (
+                    <p className="mt-5 rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-cyan-100">
+                      {mergeMessage}
+                    </p>
+                  )}
+
+                  {walkthroughUrl && (
+                    <div className="mt-6 rounded-2xl border border-white/10 bg-black/35 p-4">
+                      <video
+                        key={walkthroughUrl}
+                        src={walkthroughUrl}
+                        controls
+                        playsInline
+                        className="aspect-video w-full rounded-xl bg-black object-contain"
+                      />
+
+                      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                        <a
+                          href={walkthroughUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 rounded-xl border border-white/15 px-5 py-3 text-center font-semibold transition hover:bg-white/10"
+                        >
+                          Open walkthrough
+                        </a>
+
+                        <a
+                          href={walkthroughUrl}
+                          download={walkthroughFilename}
+                          className="flex-1 rounded-xl bg-white px-5 py-3 text-center font-semibold text-black transition hover:bg-cyan-100"
+                        >
+                          Download walkthrough
+                        </a>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -946,7 +1095,9 @@ export default function Home() {
                             togglePhotoSelection(photoNumber)
                           }
                           disabled={
-                            isGeneratingClip || isGeneratingAll
+                            isGeneratingClip ||
+                            isGeneratingAll ||
+                            isMergingClips
                           }
                           className={`mb-3 block w-full rounded-xl border px-4 py-3 font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                             isSelected
@@ -968,7 +1119,9 @@ export default function Home() {
                             )
                           }
                           disabled={
-                            isGeneratingClip || isGeneratingAll
+                            isGeneratingClip ||
+                            isGeneratingAll ||
+                            isMergingClips
                           }
                           className="block w-full rounded-xl bg-cyan-300 px-4 py-3 font-semibold text-black transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -1013,7 +1166,7 @@ export default function Home() {
               {
                 number: "03",
                 title: "Build the walkthrough",
-                text: "The next phase combines the saved clips into one finished property video.",
+                text: "Merge the generated clips into one finished, playable, and downloadable MP4 walkthrough.",
               },
             ].map((item) => (
               <div
