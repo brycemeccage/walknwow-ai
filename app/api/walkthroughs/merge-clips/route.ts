@@ -102,8 +102,12 @@ async function normalizeClip(
 ): Promise<void> {
   await runFFmpeg([
     "-y",
+    "-ss",
+    "0.8",
     "-i",
     inputPath,
+    "-t",
+    "4.0",
     "-vf",
     [
       "scale=1280:720:force_original_aspect_ratio=decrease",
@@ -117,7 +121,7 @@ async function normalizeClip(
     "-preset",
     "medium",
     "-crf",
-    "20",
+    "18",
     "-movflags",
     "+faststart",
     outputPath,
