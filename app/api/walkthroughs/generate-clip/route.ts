@@ -367,13 +367,13 @@ export async function POST(
     950
   );
 
-const motionRules =
-  "Keep natural motion continuous. Visible ceiling fans must rotate steadily for the entire shot. Fireplace flames must stay inside the firebox; never create smoke, haze, sparks, embers, or flames in the room. Preserve all architecture, furniture, fixtures, materials and geometry exactly. Do not add, remove, move, morph or redesign objects.";
+const fidelityRules =
+  "Use the source image as strict ground truth. Preserve every visible object, wall, window, door, fixture, furnishing, material, reflection, exterior view, tree, plant and landscape exactly; do not add, remove, move, reshape, replace or invent anything. Keep perspective and geometry stable with only restrained camera motion. Any visible ceiling fan may rotate steadily. Any visible fireplace flame stays inside the firebox. No smoke, haze, sparks or invented environmental effects.";
 
 const promptText =
-  `${baseScenePrompt.slice(0, 650)} ${motionRules}`.slice(0, 995);
+  `${baseScenePrompt.slice(0, 500)} ${fidelityRules}`.slice(0, 995);
 
-    const propertyLockSummary =
+const propertyLockSummary =
       summarizePropertyLock(
         propertyLock
       );
