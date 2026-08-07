@@ -367,21 +367,11 @@ export async function POST(
     950
   );
 
-const promptText = `
-${baseScenePrompt}
+const motionRules =
+  "Keep natural motion continuous. Visible ceiling fans must rotate steadily for the entire shot. Fireplace flames must stay inside the firebox; never create smoke, haze, sparks, embers, or flames in the room. Preserve all architecture, furniture, fixtures, materials and geometry exactly. Do not add, remove, move, morph or redesign objects.";
 
-PHYSICAL MOTION RULES:
-- Preserve all existing natural motion continuously for the entire shot.
-- If a ceiling fan is visible, keep it rotating continuously at a consistent realistic speed for all 5 seconds.
-- Never stop, reverse, wobble, deform, or change the ceiling fan blades.
-- If a fireplace is visible, keep flames naturally animated but fully contained inside the fireplace or firebox.
-- Never generate smoke, haze, sparks, embers, or flames outside the fireplace.
-- Never allow smoke or fire to enter the room.
-- Do not invent new environmental motion or effects.
-- Preserve all walls, doors, windows, furniture, fixtures, materials, reflections, and architectural geometry exactly.
-- Do not add, remove, move, morph, bend, stretch, redesign, or replace anything.
-- Maintain the restrained stable camera behavior already specified.
-`.trim();
+const promptText =
+  `${baseScenePrompt.slice(0, 650)} ${motionRules}`.slice(0, 995);
 
     const propertyLockSummary =
       summarizePropertyLock(
