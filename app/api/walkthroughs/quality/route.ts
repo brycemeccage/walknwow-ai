@@ -204,14 +204,22 @@ function normalizeAnalysis(
     : [];
 
   const overallScore = clampScore(
-    raw.overallScore
-  );
+  raw.overallScore
+);
 
-  const hardFailure =
-    raw.openingBlurDetected === true ||
-    raw.architectureChanged === true ||
-    raw.geometryWarpDetected === true ||
-    raw.furnitureOrFixtureChanged === true;
+const sharpnessScore = clampScore(
+  raw.sharpnessScore
+);
+
+const openingBlurDetected =
+  raw.openingBlurDetected === true ||
+  sharpnessScore < 88;
+
+const hardFailure =
+  openingBlurDetected ||
+  raw.architectureChanged === true ||
+  raw.geometryWarpDetected === true ||
+  raw.furnitureOrFixtureChanged === true;
 
   return {
     pass:
