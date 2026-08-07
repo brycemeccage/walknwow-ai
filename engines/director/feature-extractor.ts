@@ -1,0 +1,1 @@
+export const features=(f:string[])=>Array.from(new Set(f));

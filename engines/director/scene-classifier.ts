@@ -1,0 +1,1 @@
+export const classify=(category:string)=>category;

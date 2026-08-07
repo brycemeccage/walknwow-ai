@@ -1,0 +1,1 @@
+export const luxury=(q:number,s:number)=>Math.round(q*.5+s*.5);

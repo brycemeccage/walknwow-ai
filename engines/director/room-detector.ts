@@ -1,0 +1,1 @@
+export const room=(c:string)=>c.replace(/_/g," ");

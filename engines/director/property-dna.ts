@@ -1,0 +1,1 @@
+export const buildPropertyDNA=(photos:any[])=>({photoCount:photos.length});

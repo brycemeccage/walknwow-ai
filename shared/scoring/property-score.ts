@@ -1,0 +1,1 @@
+export const score=(...v:number[])=>Math.round(v.reduce((a,b)=>a+b,0)/Math.max(v.length,1));
