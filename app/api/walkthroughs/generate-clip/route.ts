@@ -393,7 +393,7 @@ export async function POST(
           promptImage,
           promptText,
           ratio: "1280:720",
-          duration: 2,
+          duration: 5,
         })
         .waitForTaskOutput();
 
@@ -422,7 +422,7 @@ export async function POST(
       productionPreset: {
         key: "preset_a",
         label: "Locked 2s",
-        durationSeconds: 2,
+        durationSeconds: 5,
         cameraBehavior: "locked",
         motionBehavior: "almost_static",
       },
@@ -451,7 +451,7 @@ export async function POST(
           profile.movement.key,
         motionBudget:
           profile.motionBudget,
-        durationSeconds: 2,
+        durationSeconds: 5,
         qualityRisk:
           profile.qualityRisk,
       },
