@@ -360,12 +360,28 @@ export async function POST(
           propertyLock.criticalArchitecture,
       });
 
-    const promptText =
-      mergeSceneLifeIntoPrompt(
-        propertyPrompt,
-        sceneLifePlan,
-        950
-      );
+    const baseScenePrompt =
+  mergeSceneLifeIntoPrompt(
+    propertyPrompt,
+    sceneLifePlan,
+    950
+  );
+
+const promptText = `
+${baseScenePrompt}
+
+PHYSICAL MOTION RULES:
+- Preserve all existing natural motion continuously for the entire shot.
+- If a ceiling fan is visible, keep it rotating continuously at a consistent realistic speed for all 5 seconds.
+- Never stop, reverse, wobble, deform, or change the ceiling fan blades.
+- If a fireplace is visible, keep flames naturally animated but fully contained inside the fireplace or firebox.
+- Never generate smoke, haze, sparks, embers, or flames outside the fireplace.
+- Never allow smoke or fire to enter the room.
+- Do not invent new environmental motion or effects.
+- Preserve all walls, doors, windows, furniture, fixtures, materials, reflections, and architectural geometry exactly.
+- Do not add, remove, move, morph, bend, stretch, redesign, or replace anything.
+- Maintain the restrained stable camera behavior already specified.
+`.trim();
 
     const propertyLockSummary =
       summarizePropertyLock(
