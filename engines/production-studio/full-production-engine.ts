@@ -5,7 +5,7 @@ import { buildRenderPlan } from "../rendering";
 import type {
   FullProductionInput,
   FullProductionResult,
-} from "./full-production-types";
+} from "./production-studio/full-production-types";
 
 export async function runFullProduction(
   input: FullProductionInput

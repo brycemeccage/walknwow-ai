@@ -1,8 +1,8 @@
-import type { Photo } from "../director/director-types";
-import type { EditScene } from "../editing";
-import type { RealtorBranding } from "../branding";
-import type { ExportAspect, ExportPreset } from "../export";
-import type { RenderPlan } from "../rendering";
+import type { Photo } from "../../director/director-types";
+import type { EditScene } from "../../editing";
+import type { RealtorBranding } from "../../branding";
+import type { ExportAspect, ExportPreset } from "../../export";
+import type { RenderPlan } from "../../rendering";
 
 export type FullProductionInput = {
   jobId: string;

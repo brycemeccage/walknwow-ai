@@ -326,16 +326,17 @@ async function downloadToFile(
 ): Promise<void> {
   const response = await fetch(url);
 
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
     throw new Error(
       `Could not download media: ${response.status}`
     );
   }
 
-  await pipeline(
-    response.body,
-    createWriteStream(filePath)
+  const buffer = Buffer.from(
+    await response.arrayBuffer()
   );
+
+  await writeFile(filePath, buffer);
 }
 
 async function resolveSourceImage(

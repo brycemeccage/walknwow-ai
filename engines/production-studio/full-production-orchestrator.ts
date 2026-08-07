@@ -1,7 +1,7 @@
 import type {
   FullProductionInput,
   FullProductionResult,
-} from "./full-production-types";
+} from "./production-studio/full-production-types";
 import { runFullProduction } from "./full-production-engine";
 
 export type FullProductionProgress = {

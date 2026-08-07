@@ -33,8 +33,8 @@ export function buildExportPlan(
 ): ExportPlan {
   const base = PRESETS[preset];
 
-  let width = base.width;
-  let height = base.height;
+  let width: number = base.width;
+  let height: number = base.height;
 
   if (aspect === "9:16") {
     width = base.height;
@@ -53,8 +53,7 @@ export function buildExportPlan(
     height,
     fps: 30,
     codec: "h264",
-    videoBitrateMbps:
-      base.bitrate,
+    videoBitrateMbps: base.bitrate,
     audioBitrateKbps: 192,
   };
 }
