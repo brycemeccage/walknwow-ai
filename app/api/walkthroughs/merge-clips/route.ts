@@ -175,8 +175,8 @@ export async function POST(request: Request) {
   const jobId = randomUUID();
 
   const tempDirectory = path.join(
-    process.cwd(),
-    ".walknwow-temp",
+    "/tmp",
+    "walknwow-temp",
     jobId
   );
 
