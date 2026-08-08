@@ -1,14 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import {
-  mkdir,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { NextResponse } from "next/server";
+
+import { put } from "@vercel/blob";
 import ffmpegStatic from "ffmpeg-static";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -20,7 +17,9 @@ type MergeClipsRequest = {
 function runFFmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpegPath =
-      process.env.FFMPEG_PATH?.trim() || ffmpegStatic || "ffmpeg";
+      process.env.FFMPEG_PATH?.trim() ||
+      ffmpegStatic ||
+      "ffmpeg";
 
     const child = spawn(ffmpegPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -91,7 +90,9 @@ async function downloadClip(
   );
 
   if (buffer.length === 0) {
-    throw new Error("A downloaded Runway clip was empty.");
+    throw new Error(
+      "A downloaded Runway clip was empty."
+    );
   }
 
   await writeFile(outputPath, buffer);
@@ -181,16 +182,10 @@ export async function POST(request: Request) {
     jobId
   );
 
-  const outputDirectory = path.join(
-    process.cwd(),
-    "public",
-    "generated"
-  );
-
   const filename = `walkthrough-${jobId}.mp4`;
 
   const outputPath = path.join(
-    outputDirectory,
+    tempDirectory,
     filename
   );
 
@@ -198,7 +193,8 @@ export async function POST(request: Request) {
     const body =
       (await request.json()) as MergeClipsRequest;
 
-    const clipUrls = getValidClipUrls(body.clips);
+    const clipUrls =
+      getValidClipUrls(body.clips);
 
     if (clipUrls.length < 2) {
       return NextResponse.json(
@@ -215,10 +211,6 @@ export async function POST(request: Request) {
       recursive: true,
     });
 
-    await mkdir(outputDirectory, {
-      recursive: true,
-    });
-
     const normalizedPaths: string[] = [];
 
     for (
@@ -226,10 +218,9 @@ export async function POST(request: Request) {
       index < clipUrls.length;
       index += 1
     ) {
-      const number = String(index + 1).padStart(
-        2,
-        "0"
-      );
+      const number = String(
+        index + 1
+      ).padStart(2, "0");
 
       const downloadedPath = path.join(
         tempDirectory,
@@ -251,7 +242,9 @@ export async function POST(request: Request) {
         normalizedPath
       );
 
-      normalizedPaths.push(normalizedPath);
+      normalizedPaths.push(
+        normalizedPath
+      );
     }
 
     await mergeClips(
@@ -260,7 +253,8 @@ export async function POST(request: Request) {
       tempDirectory
     );
 
-    const finalVideo = await readFile(outputPath);
+    const finalVideo =
+      await readFile(outputPath);
 
     if (finalVideo.length === 0) {
       throw new Error(
@@ -268,14 +262,29 @@ export async function POST(request: Request) {
       );
     }
 
+    const blob = await put(
+      `walkthroughs/${filename}`,
+      finalVideo,
+      {
+        access: "public",
+        contentType: "video/mp4",
+        addRandomSuffix: false,
+      }
+    );
+
     return NextResponse.json({
       success: true,
       clipCount: clipUrls.length,
       filename,
-      videoUrl: `/generated/${filename}`,
+      videoUrl: blob.url,
+      blobUrl: blob.url,
+      sizeBytes: finalVideo.length,
     });
   } catch (error) {
-    console.error("Merge clips error:", error);
+    console.error(
+      "Merge clips error:",
+      error
+    );
 
     return NextResponse.json(
       {
