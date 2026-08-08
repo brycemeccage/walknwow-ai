@@ -38,6 +38,10 @@ type QualityAnalysis = {
   architectureChanged: boolean;
   geometryWarpDetected: boolean;
   furnitureOrFixtureChanged: boolean;
+  textureDriftDetected: boolean;
+  smallObjectDriftDetected: boolean;
+  materialDriftDetected: boolean;
+  exteriorDriftDetected: boolean;
   lightingFlickerDetected: boolean;
   problems: string[];
   strengths: string[];
@@ -73,6 +77,10 @@ const QUALITY_SCHEMA = {
     "architectureChanged",
     "geometryWarpDetected",
     "furnitureOrFixtureChanged",
+    "textureDriftDetected",
+    "smallObjectDriftDetected",
+    "materialDriftDetected",
+    "exteriorDriftDetected",
     "lightingFlickerDetected",
     "problems",
     "strengths",
@@ -125,6 +133,18 @@ const QUALITY_SCHEMA = {
       type: "boolean",
     },
     furnitureOrFixtureChanged: {
+      type: "boolean",
+    },
+    textureDriftDetected: {
+      type: "boolean",
+    },
+    smallObjectDriftDetected: {
+      type: "boolean",
+    },
+    materialDriftDetected: {
+      type: "boolean",
+    },
+    exteriorDriftDetected: {
       type: "boolean",
     },
     lightingFlickerDetected: {
@@ -219,7 +239,11 @@ const hardFailure =
   openingBlurDetected ||
   raw.architectureChanged === true ||
   raw.geometryWarpDetected === true ||
-  raw.furnitureOrFixtureChanged === true;
+  raw.furnitureOrFixtureChanged === true ||
+  raw.textureDriftDetected === true ||
+  raw.smallObjectDriftDetected === true ||
+  raw.materialDriftDetected === true ||
+  raw.exteriorDriftDetected === true;
 
   return {
     pass:
@@ -253,6 +277,14 @@ const hardFailure =
       raw.geometryWarpDetected === true,
     furnitureOrFixtureChanged:
       raw.furnitureOrFixtureChanged === true,
+    textureDriftDetected:
+      raw.textureDriftDetected === true,
+    smallObjectDriftDetected:
+      raw.smallObjectDriftDetected === true,
+    materialDriftDetected:
+      raw.materialDriftDetected === true,
+    exteriorDriftDetected:
+      raw.exteriorDriftDetected === true,
     lightingFlickerDetected:
       raw.lightingFlickerDetected === true,
     problems,
@@ -559,13 +591,30 @@ Objects, materials, colors, fixtures, lighting, and furniture positions must rem
 Motion should resemble a slow stabilized gimbal glide.
 Reject aggressive zooming, orbiting, spinning, impossible flying, abrupt movement, or excessive perspective change.
 
-6. FLICKER
-Reject lighting flicker, texture flicker, object popping, or unstable materials.
+6. MICRO-DETAIL PRESERVATION
+   Compare fine details directly against the original listing photo.
+   Couch fabric, upholstery texture, cushion seams, pillows, blankets, rugs, flooring grain, stone texture, wood grain, countertop patterns, cabinet handles, appliance details, trim, railings, artwork, and decor must remain visually identical.
+   Set textureDriftDetected=true when textures, seams, patterns, grain, or fine surface details visibly change.
+   Set materialDriftDetected=true when a material changes color, finish, reflectivity, pattern, texture, or construction.
+
+7. SMALL OBJECT PRESERVATION
+   Every visible small object must keep the same shape, count, color, position, and orientation.
+   Inspect coffee tables, dining tables, countertops, shelves, fireplace mantels, lamps, bottles, remotes, decor, handles, controls, artwork, and accessories.
+   Set smallObjectDriftDetected=true if anything appears, disappears, moves, changes shape, merges, splits, or morphs.
+
+8. EXTERIOR AND WINDOW-VIEW PRESERVATION
+   Treat everything visible through windows and doors as locked source-image content.
+   Trees, bushes, grass, decks, fences, neighboring structures, sky, horizons, and landscaping must remain consistent.
+   Reject boiling vegetation, morphing trees, invented branches, changing landscaping, moving structures, or altered views.
+   Set exteriorDriftDetected=true when exterior details change unnaturally.
+
+9. FLICKER
+   Reject lighting flicker, texture flicker, object popping, unstable materials, or temporal crawling.
 
 SCORING
 Use 0–100 scores.
 A client-ready clip should score at least 82 overall.
-Any architecture change, major geometry warp, furniture movement, or obvious opening blur is an automatic failure.
+Any architecture change, geometry warp, furniture or fixture change, texture drift, small-object drift, material drift, exterior drift, or obvious opening blur is an automatic failure.
 
 RETRY PROMPT
 When the clip fails, provide one concise regeneration instruction that directly addresses the problems.
@@ -589,6 +638,10 @@ function fallbackAnalysis(
     architectureChanged: false,
     geometryWarpDetected: false,
     furnitureOrFixtureChanged: false,
+    textureDriftDetected: false,
+    smallObjectDriftDetected: false,
+    materialDriftDetected: false,
+    exteriorDriftDetected: false,
     lightingFlickerDetected: false,
     problems: [
       `Automatic inspection could not complete: ${reason}`,
