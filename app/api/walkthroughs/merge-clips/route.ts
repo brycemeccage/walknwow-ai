@@ -142,10 +142,10 @@ async function mergeClipsWithFade(
   const filters: string[] = [];
 
   normalizedPaths.forEach((_, index) => {
-    filters.push(
-      `[${index}:v]settb=AVTB,setpts=PTS-STARTPTS[v${index}]`
-    );
-  });
+  filters.push(
+    `[${index}:v]fps=30,settb=1/30,setpts=N/(30*TB),format=yuv420p[v${index}]`
+  );
+});
 
   let previous = "v0";
 
