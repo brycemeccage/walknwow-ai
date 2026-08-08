@@ -14,6 +14,9 @@ type MergeClipsRequest = {
   clips?: unknown;
 };
 
+const CLIP_DURATION = 4.0;
+const FADE_DURATION = 0.35;
+
 function runFFmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpegPath =
@@ -56,18 +59,14 @@ function getValidClipUrls(value: unknown): string[] {
     return [];
   }
 
-  const validUrls: string[] = [];
-
-  for (const item of value) {
-    if (
-      typeof item === "string" &&
-      /^https?:\/\//i.test(item.trim())
-    ) {
-      validUrls.push(item.trim());
-    }
-  }
-
-  return validUrls.slice(0, 30);
+  return value
+    .filter(
+      (item): item is string =>
+        typeof item === "string" &&
+        /^https?:\/\//i.test(item.trim())
+    )
+    .map((item) => item.trim())
+    .slice(0, 30);
 }
 
 async function downloadClip(
@@ -109,7 +108,7 @@ async function normalizeClip(
     "-i",
     inputPath,
     "-t",
-    "4.0",
+    String(CLIP_DURATION),
     "-vf",
     [
       "scale=1280:720:force_original_aspect_ratio=decrease",
@@ -121,56 +120,71 @@ async function normalizeClip(
     "-c:v",
     "libx264",
     "-preset",
-    "medium",
+    "slow",
     "-crf",
-    "18",
+    "15",
     "-movflags",
     "+faststart",
     outputPath,
   ]);
 }
 
-async function mergeClips(
+async function mergeClipsWithFade(
   normalizedPaths: string[],
-  outputPath: string,
-  tempDirectory: string
+  outputPath: string
 ): Promise<void> {
-  const listPath = path.join(
-    tempDirectory,
-    "concat-list.txt"
-  );
-
-  const lines: string[] = [];
+  const args: string[] = ["-y"];
 
   for (const clipPath of normalizedPaths) {
-    const safePath = clipPath.replaceAll(
-      "'",
-      "'\\''"
-    );
-
-    lines.push(`file '${safePath}'`);
+    args.push("-i", clipPath);
   }
 
-  await writeFile(
-    listPath,
-    lines.join("\n"),
-    "utf8"
-  );
+  const filters: string[] = [];
 
-  await runFFmpeg([
-    "-y",
-    "-f",
-    "concat",
-    "-safe",
-    "0",
-    "-i",
-    listPath,
-    "-c",
-    "copy",
+  normalizedPaths.forEach((_, index) => {
+    filters.push(
+      `[${index}:v]settb=AVTB,setpts=PTS-STARTPTS[v${index}]`
+    );
+  });
+
+  let previous = "v0";
+
+  for (let index = 1; index < normalizedPaths.length; index += 1) {
+    const outputLabel = `xf${index}`;
+    const offset =
+      index * (CLIP_DURATION - FADE_DURATION);
+
+    filters.push(
+      `[${previous}][v${index}]xfade=` +
+        `transition=fade:` +
+        `duration=${FADE_DURATION}:` +
+        `offset=${offset.toFixed(2)}` +
+        `[${outputLabel}]`
+    );
+
+    previous = outputLabel;
+  }
+
+  args.push(
+    "-filter_complex",
+    filters.join(";"),
+    "-map",
+    `[${previous}]`,
+    "-an",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "slow",
+    "-crf",
+    "15",
+    "-pix_fmt",
+    "yuv420p",
     "-movflags",
     "+faststart",
-    outputPath,
-  ]);
+    outputPath
+  );
+
+  await runFFmpeg(args);
 }
 
 export async function POST(request: Request) {
@@ -247,10 +261,9 @@ export async function POST(request: Request) {
       );
     }
 
-    await mergeClips(
+    await mergeClipsWithFade(
       normalizedPaths,
-      outputPath,
-      tempDirectory
+      outputPath
     );
 
     const finalVideo =
@@ -279,6 +292,8 @@ export async function POST(request: Request) {
       videoUrl: blob.url,
       blobUrl: blob.url,
       sizeBytes: finalVideo.length,
+      transition: "fade",
+      transitionDurationSeconds: FADE_DURATION,
     });
   } catch (error) {
     console.error(
