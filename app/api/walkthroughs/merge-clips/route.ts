@@ -8,6 +8,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import ffmpegStatic from "ffmpeg-static";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -19,7 +20,7 @@ type MergeClipsRequest = {
 function runFFmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpegPath =
-      process.env.FFMPEG_PATH?.trim() || "ffmpeg";
+      process.env.FFMPEG_PATH?.trim() || ffmpegStatic || "ffmpeg";
 
     const child = spawn(ffmpegPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
