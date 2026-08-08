@@ -603,10 +603,28 @@ Reject aggressive zooming, orbiting, spinning, impossible flying, abrupt movemen
    Set smallObjectDriftDetected=true if anything appears, disappears, moves, changes shape, merges, splits, or morphs.
 
 8. EXTERIOR AND WINDOW-VIEW PRESERVATION
-   Treat everything visible through windows and doors as locked source-image content.
-   Trees, bushes, grass, decks, fences, neighboring structures, sky, horizons, and landscaping must remain consistent.
-   Reject boiling vegetation, morphing trees, invented branches, changing landscaping, moving structures, or altered views.
-   Set exteriorDriftDetected=true when exterior details change unnaturally.
+   Treat everything outdoors and everything visible through windows, doors, and glass as locked source-image content.
+
+   Trees, trunks, branches, leaves, bushes, shrubs, grass, flowers, landscaping, decks, fences, neighboring structures, sky, clouds, water, horizons, distant scenery, and outdoor reflections must remain visually stable and consistent with the original listing photo.
+
+   TREE AND VEGETATION RULES:
+   - Tree trunks must keep the same shape, thickness, angle, position, and count.
+   - Major branches must keep the same structure, location, shape, and count.
+   - Do not invent, remove, merge, split, stretch, bend, or relocate branches.
+   - Leaves and foliage may have only extremely subtle natural movement.
+   - Reject foliage that boils, crawls, shimmers, pulses, melts, morphs, flickers, regenerates, or changes density.
+   - Bushes and shrubs must preserve the same silhouette, size, boundary, texture, and position.
+   - Grass must remain stable and must not smear, crawl, flicker, regenerate, or wave unnaturally.
+   - No new trees, plants, flowers, branches, bushes, or landscaping may appear.
+   - Existing landscaping must not disappear or change identity.
+   - Window views must preserve the same trees, structures, horizon, landscaping, and composition.
+   - Exterior reflections in windows or glass must remain consistent with the real outdoor scene.
+   - Sky and clouds must not create obvious artificial motion or temporal instability.
+   - Do not excuse obvious vegetation instability as wind.
+
+   Tiny realistic leaf movement is acceptable only when the tree identity, trunk, branch structure, foliage silhouette, density, and position remain stable.
+
+   Set exteriorDriftDetected=true if ANY tree, branch, foliage mass, bush, grass area, landscaping feature, outdoor reflection, sky detail, structure, horizon, or exterior view changes unnaturally or looks AI-generated between frames.
 
 9. FLICKER
    Reject lighting flicker, texture flicker, object popping, unstable materials, or temporal crawling.
