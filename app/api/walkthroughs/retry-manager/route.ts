@@ -74,6 +74,8 @@ type AttemptResult = {
   videoUrl: string;
   taskId: string;
   overallScore: number;
+  sharpnessScore: number;
+  motionScore: number;
   pass: boolean;
   problems: string[];
   strengths: string[];
@@ -436,9 +438,28 @@ export async function POST(
             100
           );
 
+        const sharpnessScore =
+          number(
+            analysis.sharpnessScore,
+            0,
+            0,
+            100
+          );
+
+        const motionScore =
+          number(
+            analysis.motionScore,
+            0,
+            0,
+            100
+          );
+
         const pass =
           analysis.pass === true &&
-          score >= passingScore;
+          score >= passingScore &&
+          sharpnessScore >= 90 &&
+          motionScore >= 80 &&
+          analysis.openingBlurDetected !== true;
 
         const result:
           AttemptResult = {
@@ -453,6 +474,8 @@ export async function POST(
               generation.data.taskId
             ),
           overallScore: score,
+          sharpnessScore,
+          motionScore,
           pass,
           problems:
             stringList(
@@ -504,6 +527,8 @@ export async function POST(
           videoUrl: "",
           taskId: "",
           overallScore: 0,
+          sharpnessScore: 0,
+          motionScore: 0,
           pass: false,
           problems: [
             error instanceof Error
@@ -557,9 +582,28 @@ export async function POST(
 
     const bestAttempt =
       [...successfulAttempts].sort(
-        (a, b) =>
-          b.overallScore -
-          a.overallScore
+        (a, b) => {
+          const sharpnessDifference =
+            b.sharpnessScore -
+            a.sharpnessScore;
+
+          if (sharpnessDifference !== 0) {
+            return sharpnessDifference;
+          }
+
+          const overallDifference =
+            b.overallScore -
+            a.overallScore;
+
+          if (overallDifference !== 0) {
+            return overallDifference;
+          }
+
+          return (
+            b.motionScore -
+            a.motionScore
+          );
+        }
       )[0];
 
     return NextResponse.json({
