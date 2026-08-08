@@ -1330,25 +1330,85 @@ function combineOutput(
 const selectedSet = new Set<number>();
 const usedRoomKeys = new Set<string>();
 
-const storyPhotoSet = new Set(
-  storyResult.selectedPhotoNumbers
-);
+const storyPhotoSet =
+  new Set(
+    storyResult.selectedPhotoNumbers
+  );
 
 function normalizedRoomKey(
   photo: PhotoAnalysis
 ): string {
-  const raw =
-    (photo.roomLabel || photo.category || "other")
+  const value =
+    `${photo.category} ${photo.roomLabel}`
       .toLowerCase()
+      .replace(
+        /\b(angle|alternate|alt|view|shot|photo)\s*#?\d*\b/g,
+        ""
+      )
+      .replace(/\s+/g, " ")
       .trim();
 
-  return raw
-    .replace(
-      /\b(angle|alternate|alt|view|shot|photo)\s*#?\d*\b/g,
-      ""
+  if (
+    /primary bedroom|master bedroom|primary suite|master suite/.test(
+      value
     )
-    .replace(/\s+/g, " ")
-    .trim();
+  ) {
+    return "primary-bedroom";
+  }
+
+  if (
+    /primary bath|master bath/.test(
+      value
+    )
+  ) {
+    return "primary-bath";
+  }
+
+  if (
+    /living room|family room|great room/.test(
+      value
+    )
+  ) {
+    return "main-living";
+  }
+
+  if (/kitchen/.test(value)) {
+    return "kitchen";
+  }
+
+  if (/dining/.test(value)) {
+    return "dining";
+  }
+
+  if (
+    /front exterior|exterior front|front elevation|front of home/.test(
+      value
+    )
+  ) {
+    return "front-exterior";
+  }
+
+  if (
+    /rear exterior|back exterior|backyard/.test(
+      value
+    )
+  ) {
+    return "rear-exterior";
+  }
+
+  if (/pool/.test(value)) {
+    return "pool";
+  }
+
+  if (/patio|deck/.test(value)) {
+    return "patio-deck";
+  }
+
+  if (/aerial|drone/.test(value)) {
+    return "aerial";
+  }
+
+  return value;
 }
 
 function importanceBonus(
@@ -1371,11 +1431,11 @@ function importanceBonus(
       value
     )
   ) {
-    return 27;
+    return 28;
   }
 
   if (/kitchen/.test(value)) {
-    return 27;
+    return 28;
   }
 
   if (
@@ -1383,7 +1443,7 @@ function importanceBonus(
       value
     )
   ) {
-    return 25;
+    return 26;
   }
 
   if (
@@ -1391,23 +1451,23 @@ function importanceBonus(
       value
     )
   ) {
-    return 23;
+    return 24;
   }
 
   if (/dining/.test(value)) {
-    return 20;
+    return 21;
   }
 
   if (
-    /pool|backyard|patio|deck|view|waterfront|dock/.test(
+    /pool|backyard|patio|deck|waterfront|dock|view/.test(
       value
     )
   ) {
-    return 22;
+    return 23;
   }
 
   if (
-    /theater|gym|game room|office|guest house|garage|amenity/.test(
+    /theater|gym|game room|office|guest house|garage/.test(
       value
     )
   ) {
@@ -1427,10 +1487,10 @@ function importanceBonus(
       value
     )
   ) {
-    return 2;
+    return -4;
   }
 
-  return 10;
+  return 8;
 }
 
 function riskAdjustment(
@@ -1441,56 +1501,107 @@ function riskAdjustment(
   }
 
   if (riskLevel === "medium") {
-    return 1;
+    return 0;
   }
 
-  return -12;
+  return -16;
 }
 
 function selectionScore(
   photo: PhotoAnalysis
 ): number {
   return (
-    photo.qualityScore * 0.42 +
-    photo.storytellingScore * 0.24 +
-    photo.animationSuitabilityScore * 0.22 +
+    photo.qualityScore * 0.44 +
+    photo.storytellingScore * 0.20 +
+    photo.animationSuitabilityScore * 0.24 +
     importanceBonus(photo) +
-    riskAdjustment(photo.distortionRisk) +
-    riskAdjustment(photo.blurRisk) +
-    (photo.includeRecommendation ? 6 : -6) +
-    (storyPhotoSet.has(photo.photoNumber)
-      ? 5
-      : 0)
+    riskAdjustment(
+      photo.distortionRisk
+    ) +
+    riskAdjustment(
+      photo.blurRisk
+    ) +
+    (
+      photo.includeRecommendation
+        ? 5
+        : -8
+    ) +
+    (
+      storyPhotoSet.has(
+        photo.photoNumber
+      )
+        ? 4
+        : 0
+    )
   );
 }
 
-const rankedPhotos = [...photos]
-  .filter(
-    (photo) =>
-      photo.duplicateOf === 0 &&
-      photo.qualityScore >= 55 &&
-      photo.animationSuitabilityScore >= 45
-  )
-  .sort(
-    (a, b) =>
-      selectionScore(b) -
-      selectionScore(a)
+const rankedPhotos =
+  [...photos]
+    .filter(
+      (photo) =>
+        photo.duplicateOf === 0 &&
+        photo.qualityScore >= 68 &&
+        photo.animationSuitabilityScore >= 58 &&
+        photo.blurRisk !== "high"
+    )
+    .sort(
+      (a, b) =>
+        selectionScore(b) -
+        selectionScore(a)
+    );
+
+const dynamicMaximum =
+  Math.min(
+    18,
+    Math.max(
+      10,
+      Math.round(
+        photos.length * 0.60
+      )
+    )
   );
 
 for (const photo of rankedPhotos) {
+  if (
+    selected.length >=
+    dynamicMaximum
+  ) {
+    break;
+  }
+
   const roomKey =
     normalizedRoomKey(photo);
 
   if (
-    selectedSet.has(photo.photoNumber) ||
-    usedRoomKeys.has(roomKey)
+    selectedSet.has(
+      photo.photoNumber
+    ) ||
+    usedRoomKeys.has(
+      roomKey
+    )
   ) {
     continue;
   }
 
-  selected.push(photo.photoNumber);
-  selectedSet.add(photo.photoNumber);
-  usedRoomKeys.add(roomKey);
+  const score =
+    selectionScore(photo);
+
+  if (score < 90) {
+    continue;
+  }
+
+  selected.push(
+    photo.photoNumber
+  );
+
+  selectedSet.add(
+    photo.photoNumber
+  );
+
+  usedRoomKeys.add(
+    roomKey
+  );
 }
 
 const storyMap =
