@@ -1316,435 +1316,170 @@ function combineOutput(
     directorNotes: string[];
   }
 ): DirectorOutput {
-  const photoMap =
-    new Map(
-      photos.map(
-        (photo) => [
-          photo.photoNumber,
-          photo,
-        ]
-      )
-    );
-
-  const selected: number[] = [];
-const selectedSet = new Set<number>();
-const usedRoomKeys = new Set<string>();
-
-const storyPhotoSet =
-  new Set(
-    storyResult.selectedPhotoNumbers
+  const storySet = new Set(storyResult.selectedPhotoNumbers);
+  const storyMap = new Map(
+    storyResult.scenes.map((scene) => [scene.photoNumber, scene])
   );
 
-function normalizedRoomKey(
-  photo: PhotoAnalysis
-): string {
-  const value =
-    `${photo.category} ${photo.roomLabel}`
+  const roomKey = (photo: PhotoAnalysis): string => {
+    const value = `${photo.category} ${photo.roomLabel}`
       .toLowerCase()
-      .replace(
-        /\b(angle|alternate|alt|view|shot|photo)\s*#?\d*\b/g,
-        ""
-      )
+      .replace(/\b(angle|alternate|alt|view|shot|photo)\s*#?\d*\b/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
-  if (
-    /primary bedroom|master bedroom|primary suite|master suite/.test(
-      value
-    )
-  ) {
-    return "primary-bedroom";
-  }
+    if (/living room|family room|great room/.test(value)) return "main-living";
+    if (/kitchen/.test(value)) return "kitchen";
+    if (/primary bedroom|master bedroom|primary suite|master suite/.test(value)) return "primary-bedroom";
+    if (/primary bath|master bath/.test(value)) return "primary-bath";
+    if (/dining/.test(value)) return "dining";
+    if (/front exterior|front elevation|front of home/.test(value)) return "front-exterior";
+    if (/rear exterior|back exterior|backyard/.test(value)) return "rear-exterior";
+    if (/pool/.test(value)) return "pool";
+    if (/patio|deck/.test(value)) return "patio-deck";
+    if (/aerial|drone/.test(value)) return "aerial";
+    return value;
+  };
 
-  if (
-    /primary bath|master bath/.test(
-      value
-    )
-  ) {
-    return "primary-bath";
-  }
+  const importanceBonus = (photo: PhotoAnalysis): number => {
+    const value = `${photo.category} ${photo.roomLabel}`.toLowerCase();
+    if (/front exterior|hero|aerial/.test(value)) return 24;
+    if (/living|family room|great room|kitchen/.test(value)) return 24;
+    if (/primary bedroom|master bedroom|primary suite/.test(value)) return 22;
+    if (/primary bath|master bath/.test(value)) return 20;
+    if (/pool|backyard|patio|deck|waterfront|dock|view/.test(value)) return 19;
+    if (/dining/.test(value)) return 18;
+    if (/office|theater|gym|game room|guest house|garage/.test(value)) return 15;
+    if (/bedroom/.test(value)) return 13;
+    if (/bathroom|bath/.test(value)) return 11;
+    if (/hallway|corridor|closet|laundry|detail/.test(value)) return -8;
+    return 6;
+  };
 
-  if (
-    /living room|family room|great room/.test(
-      value
-    )
-  ) {
-    return "main-living";
-  }
+  const riskAdjustment = (risk: RiskLevel): number =>
+    risk === "low" ? 5 : risk === "medium" ? 0 : -14;
 
-  if (/kitchen/.test(value)) {
-    return "kitchen";
-  }
-
-  if (/dining/.test(value)) {
-    return "dining";
-  }
-
-  if (
-    /front exterior|exterior front|front elevation|front of home/.test(
-      value
-    )
-  ) {
-    return "front-exterior";
-  }
-
-  if (
-    /rear exterior|back exterior|backyard/.test(
-      value
-    )
-  ) {
-    return "rear-exterior";
-  }
-
-  if (/pool/.test(value)) {
-    return "pool";
-  }
-
-  if (/patio|deck/.test(value)) {
-    return "patio-deck";
-  }
-
-  if (/aerial|drone/.test(value)) {
-    return "aerial";
-  }
-
-  return value;
-}
-
-function importanceBonus(
-  photo: PhotoAnalysis
-): number {
-  const value =
-    `${photo.category} ${photo.roomLabel}`
-      .toLowerCase();
-
-  if (
-    /front exterior|exterior front|hero|aerial/.test(
-      value
-    )
-  ) {
-    return 28;
-  }
-
-  if (
-    /living|family room|great room/.test(
-      value
-    )
-  ) {
-    return 28;
-  }
-
-  if (/kitchen/.test(value)) {
-    return 28;
-  }
-
-  if (
-    /primary bedroom|master bedroom|primary suite|master suite/.test(
-      value
-    )
-  ) {
-    return 26;
-  }
-
-  if (
-    /primary bath|master bath/.test(
-      value
-    )
-  ) {
-    return 24;
-  }
-
-  if (/dining/.test(value)) {
-    return 21;
-  }
-
-  if (
-    /pool|backyard|patio|deck|waterfront|dock|view/.test(
-      value
-    )
-  ) {
-    return 23;
-  }
-
-  if (
-    /theater|gym|game room|office|guest house|garage/.test(
-      value
-    )
-  ) {
-    return 18;
-  }
-
-  if (/bedroom/.test(value)) {
-    return 16;
-  }
-
-  if (/bathroom|bath/.test(value)) {
-    return 14;
-  }
-
-  if (
-    /hallway|corridor|closet|laundry|detail/.test(
-      value
-    )
-  ) {
-    return -4;
-  }
-
-  return 8;
-}
-
-function riskAdjustment(
-  riskLevel: RiskLevel
-): number {
-  if (riskLevel === "low") {
-    return 8;
-  }
-
-  if (riskLevel === "medium") {
-    return 0;
-  }
-
-  return -16;
-}
-
-function selectionScore(
-  photo: PhotoAnalysis
-): number {
-  return (
-    photo.qualityScore * 0.44 +
+  const selectionScore = (photo: PhotoAnalysis): number =>
+    photo.qualityScore * 0.46 +
     photo.storytellingScore * 0.20 +
     photo.animationSuitabilityScore * 0.24 +
     importanceBonus(photo) +
-    riskAdjustment(
-      photo.distortionRisk
-    ) +
-    riskAdjustment(
-      photo.blurRisk
-    ) +
-    (
-      photo.includeRecommendation
-        ? 5
-        : -8
-    ) +
-    (
-      storyPhotoSet.has(
-        photo.photoNumber
-      )
-        ? 4
-        : 0
-    )
-  );
-}
+    riskAdjustment(photo.distortionRisk) +
+    riskAdjustment(photo.blurRisk) +
+    (photo.includeRecommendation ? 4 : -10) +
+    (storySet.has(photo.photoNumber) ? 6 : -12);
 
-const rankedPhotos =
-  [...photos]
-    .filter(
-      (photo) =>
+  const candidates = [...photos]
+    .filter((photo) =>
+      storySet.has(photo.photoNumber) &&
+      photo.duplicateOf === 0 &&
+      photo.includeRecommendation &&
+      photo.qualityScore >= 70 &&
+      photo.animationSuitabilityScore >= 62 &&
+      photo.blurRisk !== "high"
+    )
+    .sort((a, b) => selectionScore(b) - selectionScore(a));
+
+  const selected: number[] = [];
+  const selectedSet = new Set<number>();
+  const usedRooms = new Set<string>();
+  const maxScenes = Math.min(18, Math.max(10, Math.round(photos.length * 0.62)));
+
+  for (const photo of candidates) {
+    if (selected.length >= maxScenes) break;
+    if (selectionScore(photo) < 82) continue;
+    const key = roomKey(photo);
+    if (usedRooms.has(key)) continue;
+    selected.push(photo.photoNumber);
+    selectedSet.add(photo.photoNumber);
+    usedRooms.add(key);
+  }
+
+  if (selected.length < Math.min(8, photos.length)) {
+    const backfill = [...photos]
+      .filter((photo) =>
         photo.duplicateOf === 0 &&
-        photo.qualityScore >= 68 &&
-        photo.animationSuitabilityScore >= 58 &&
+        photo.includeRecommendation &&
+        photo.qualityScore >= 78 &&
+        photo.animationSuitabilityScore >= 70 &&
         photo.blurRisk !== "high"
-    )
-    .sort(
-      (a, b) =>
-        selectionScore(b) -
-        selectionScore(a)
-    );
-
-const dynamicMaximum =
-  Math.min(
-    18,
-    Math.max(
-      10,
-      Math.round(
-        photos.length * 0.60
       )
-    )
-  );
+      .sort((a, b) => selectionScore(b) - selectionScore(a));
 
-for (const photo of rankedPhotos) {
-  if (
-    selected.length >=
-    dynamicMaximum
-  ) {
-    break;
+    for (const photo of backfill) {
+      if (selected.length >= Math.min(12, maxScenes)) break;
+      const key = roomKey(photo);
+      if (selectedSet.has(photo.photoNumber) || usedRooms.has(key)) continue;
+      selected.push(photo.photoNumber);
+      selectedSet.add(photo.photoNumber);
+      usedRooms.add(key);
+    }
   }
 
-  const roomKey =
-    normalizedRoomKey(photo);
+  const scenes: DirectorScene[] = photos.map((photo) => {
+    const story = storyMap.get(photo.photoNumber);
+    const include = selectedSet.has(photo.photoNumber);
 
-  if (
-    selectedSet.has(
-      photo.photoNumber
-    ) ||
-    usedRoomKeys.has(
-      roomKey
-    )
-  ) {
-    continue;
-  }
+    return {
+      ...photo,
+      sceneNumber: include ? selected.indexOf(photo.photoNumber) + 1 : 0,
+      include,
+      photoNumber: photo.photoNumber,
+      importance: normalizeImportance(story?.importance),
+      storyRole: text(story?.storyRole, photo.roomLabel),
+      cameraMove: text(
+        story?.cameraMove,
+        photo.distortionRisk === "high"
+          ? "Use a restrained stabilized micro-push with visible depth."
+          : "Use a slow stabilized forward gimbal glide with subtle parallax."
+      ),
+      movementAmount:
+        story?.movementAmount === "micro" ||
+        story?.movementAmount === "subtle" ||
+        story?.movementAmount === "moderate"
+          ? story.movementAmount
+          : photo.distortionRisk === "high" ? "micro" : "subtle",
+      transitionIntent: text(story?.transitionIntent, "End naturally for a clean cut."),
+      preservationRules:
+        stringList(story?.preservationRules, 15).length > 0
+          ? stringList(story?.preservationRules, 15)
+          : [
+              "Preserve every visible architectural line exactly.",
+              "Do not add, remove, replace, restage, or move anything.",
+              "Maintain source-image identity during camera movement.",
+            ],
+      estimatedDurationSeconds: clampDuration(story?.estimatedDurationSeconds),
+    };
+  });
 
-  const score =
-    selectionScore(photo);
+  const skippedPhotos = scenes
+    .filter((scene) => !scene.include)
+    .map((scene) => ({
+      photoNumber: scene.photoNumber,
+      reason:
+        scene.duplicateOf > 0
+          ? `Duplicate of Photo ${scene.duplicateOf}. ${scene.reason}`
+          : `Not selected by final quality/importance/uniqueness gate. ${scene.reason}`,
+    }));
 
-  if (score < 90) {
-    continue;
-  }
-
-  selected.push(
-    photo.photoNumber
-  );
-
-  selectedSet.add(
-    photo.photoNumber
-  );
-
-  usedRoomKeys.add(
-    roomKey
-  );
-}
-
-const storyMap =
-    new Map(
-      storyResult.scenes.map(
-        (scene) => [
-          scene.photoNumber,
-          scene,
-        ]
-      )
-    );
-
-  const scenes:
-    DirectorScene[] =
-    photos.map((photo) => {
-      const story =
-        storyMap.get(
-          photo.photoNumber
-        );
-
-      const include =
-        selectedSet.has(
-          photo.photoNumber
-        );
-
-      return {
-        ...photo,
-        sceneNumber:
-          include
-            ? selected.indexOf(
-                photo.photoNumber
-              ) + 1
-            : 0,
-        include,
-        photoNumber:
-          photo.photoNumber,
-        importance:
-          normalizeImportance(
-            story?.importance
-          ),
-        storyRole: text(
-          story?.storyRole,
-          photo.roomLabel
-        ),
-        cameraMove: text(
-          story?.cameraMove,
-          "Use a slow stabilized forward gimbal glide."
-        ),
-        movementAmount:
-          story?.movementAmount ===
-            "micro" ||
-          story?.movementAmount ===
-            "subtle" ||
-          story?.movementAmount ===
-            "moderate"
-            ? story.movementAmount
-            : "subtle",
-        transitionIntent: text(
-          story?.transitionIntent,
-          "End naturally for a clean cut."
-        ),
-        preservationRules:
-          stringList(
-            story?.preservationRules,
-            15
-          ).length > 0
-            ? stringList(
-                story?.preservationRules,
-                15
-              )
-            : [
-                "Preserve every visible architectural line exactly.",
-                "Do not add, remove, replace, or move anything.",
-              ],
-        estimatedDurationSeconds:
-          clampDuration(
-            story?.estimatedDurationSeconds
-          ),
-      };
-    });
-
-  const skippedPhotos =
+  const estimatedRuntimeSeconds = Math.round(
     scenes
-      .filter(
-        (scene) =>
-          !scene.include
-      )
-      .map((scene) => ({
-        photoNumber:
-          scene.photoNumber,
-        reason:
-          scene.duplicateOf > 0
-            ? `Duplicate of Photo ${scene.duplicateOf}. ${scene.reason}`
-            : scene.reason,
-      }));
-
-  const estimatedRuntimeSeconds =
-    Math.round(
-      scenes
-        .filter(
-          (scene) =>
-            scene.include
-        )
-        .reduce(
-          (total, scene) =>
-            total +
-            scene.estimatedDurationSeconds,
-          0
-        )
-    );
+      .filter((scene) => scene.include)
+      .reduce((total, scene) => total + scene.estimatedDurationSeconds, 0)
+  );
 
   return {
-    version:
-      "walknwow-director-v3.1",
-    propertySummary:
-      dnaResult.propertySummary,
-    propertyDNA:
-      dnaResult.propertyDNA,
+    version: "walknwow-director-v3.1",
+    propertySummary: dnaResult.propertySummary,
+    propertyDNA: dnaResult.propertyDNA,
     scenes,
-    selectedPhotoNumbers:
-      selected,
+    selectedPhotoNumbers: selected,
     skippedPhotos,
     estimatedRuntimeSeconds,
-    coverageScore:
-      clampScore(
-        storyResult.coverageScore,
-        85
-      ),
-    storytellingScore:
-      clampScore(
-        storyResult.storytellingScore,
-        80
-      ),
-    continuityScore:
-      clampScore(
-        storyResult.continuityScore,
-        85
-      ),
-    directorNotes:
-      stringList(
-        storyResult.directorNotes,
-        30
-      ),
+    coverageScore: clampScore(storyResult.coverageScore, 85),
+    storytellingScore: clampScore(storyResult.storytellingScore, 80),
+    continuityScore: clampScore(storyResult.continuityScore, 85),
+    directorNotes: stringList(storyResult.directorNotes, 30),
   };
 }
 

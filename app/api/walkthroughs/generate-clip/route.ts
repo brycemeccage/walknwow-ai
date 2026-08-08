@@ -366,11 +366,22 @@ export async function POST(
         950
       );
 
+    const motionAmount =
+      scene.distortionRisk === "high" ||
+      scene.blurRisk === "high"
+        ? "micro"
+        : "subtle";
+
+    const walkthroughRules =
+      motionAmount === "micro"
+        ? "Create a real stabilized walkthrough feel using a very small forward camera translation with subtle natural parallax. Do not simulate motion by simply zooming or panning a flat still image."
+        : "Create a real stabilized walkthrough feel using a slow gentle forward camera translation with visible but restrained natural parallax between foreground and background. Do not simulate motion by simply zooming, cropping, or panning a flat still image.";
+
     const fidelityRules =
-      "Use the source image as strict ground truth. Preserve every visible object, wall, window, door, fixture, furnishing, material, reflection, exterior view, tree, plant and landscape exactly; do not add, remove, move, reshape, replace or invent anything. Keep perspective and geometry stable with only restrained camera motion. Any visible ceiling fan may rotate steadily. Any visible fireplace flame stays inside the firebox. No smoke, haze, sparks or invented environmental effects.";
+      "Use the source image as strict ground truth. Preserve every visible object, wall, window, door, fixture, furnishing, material, reflection, exterior view, tree, plant, landscape feature, object count, and object position. Never invent unseen rooms or objects. Keep straight lines, proportions, furniture, decor, trees, branches, foliage silhouettes, and window views stable. Begin fully sharp, remain fully sharp through the middle, and end fully sharp. No focus pull, depth-of-field blur, motion smear, softening, shimmer, morphing, exposure shift, or texture regeneration.";
 
     const promptText =
-      `${baseScenePrompt.slice(0, 500)} ${fidelityRules}`.slice(0, 995);
+      `${baseScenePrompt.slice(0, 300)} ${walkthroughRules} ${fidelityRules}`.slice(0, 995);
 
     const propertyLockSummary =
       summarizePropertyLock(
@@ -426,11 +437,11 @@ export async function POST(
       category,
       productionPreset: {
         key: "preset_a",
-        label: "Fidelity 5s",
+        label: "Balanced Walkthrough 5s",
         durationSeconds: 5,
-        cameraBehavior: "restrained",
+        cameraBehavior: "stabilized_forward_translation",
         motionBehavior:
-          "source_fidelity_first",
+          "walkthrough_parallax_with_fidelity_lock",
       },
       propertyLock: {
         ...propertyLockSummary,

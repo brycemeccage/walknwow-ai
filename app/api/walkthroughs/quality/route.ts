@@ -1,47 +1,72 @@
-import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
-import {
-  mkdir,
-  readFile,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pipeline } from "node:stream/promises";
+import { promisify } from "node:util";
 import { NextResponse } from "next/server";
+
+import { assessArchitecture } from "@/lib/quality/architecture";
+import { assessBlurFromScores } from "@/lib/quality/blur";
+import { assessGeometry } from "@/lib/quality/geometry";
+import {
+  calculateOverallQuality,
+  shouldRejectQuality,
+} from "@/lib/quality/scoring";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+const execFileAsync = promisify(execFile);
+
 type RiskLevel = "low" | "medium" | "high";
 
 type QualityRequest = {
-  sourceImageUrl?: string;
-  videoUrl?: string;
-  category?: string;
-  distortionRisk?: RiskLevel;
-  blurRisk?: RiskLevel;
+  sourceImageUrl?: unknown;
+  videoUrl?: unknown;
+  category?: unknown;
+  distortionRisk?: unknown;
+  blurRisk?: unknown;
+};
+
+type ModelAnalysis = {
+  openingSharpness: number;
+  middleSharpness: number;
+  endingSharpness: number;
+  architectureScore: number;
+  geometryScore: number;
+  continuityScore: number;
+  motionScore: number;
+  flickerScore: number;
+  architectureChanged: boolean;
+  geometryWarpDetected: boolean;
+  furnitureOrFixtureChanged: boolean;
+  vegetationDriftDetected: boolean;
+  lightingFlickerDetected: boolean;
+  excessiveMotionDetected: boolean;
+  problems: string[];
+  strengths: string[];
+  retryPrompt: string;
 };
 
 type QualityAnalysis = {
   pass: boolean;
   overallScore: number;
   sharpnessScore: number;
+  openingSharpness: number;
+  middleSharpness: number;
+  endingSharpness: number;
   architectureScore: number;
   geometryScore: number;
   continuityScore: number;
   motionScore: number;
   flickerScore: number;
   openingBlurDetected: boolean;
+  middleBlurDetected: boolean;
+  endingBlurDetected: boolean;
   architectureChanged: boolean;
   geometryWarpDetected: boolean;
   furnitureOrFixtureChanged: boolean;
-  textureDriftDetected: boolean;
-  smallObjectDriftDetected: boolean;
-  materialDriftDetected: boolean;
-  exteriorDriftDetected: boolean;
+  vegetationDriftDetected: boolean;
   lightingFlickerDetected: boolean;
   problems: string[];
   strengths: string[];
@@ -65,35 +90,36 @@ const QUALITY_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
-    "pass",
-    "overallScore",
-    "sharpnessScore",
+    "openingSharpness",
+    "middleSharpness",
+    "endingSharpness",
     "architectureScore",
     "geometryScore",
     "continuityScore",
     "motionScore",
     "flickerScore",
-    "openingBlurDetected",
     "architectureChanged",
     "geometryWarpDetected",
     "furnitureOrFixtureChanged",
-    "textureDriftDetected",
-    "smallObjectDriftDetected",
-    "materialDriftDetected",
-    "exteriorDriftDetected",
+    "vegetationDriftDetected",
     "lightingFlickerDetected",
+    "excessiveMotionDetected",
     "problems",
     "strengths",
     "retryPrompt",
   ],
   properties: {
-    pass: { type: "boolean" },
-    overallScore: {
+    openingSharpness: {
       type: "integer",
       minimum: 0,
       maximum: 100,
     },
-    sharpnessScore: {
+    middleSharpness: {
+      type: "integer",
+      minimum: 0,
+      maximum: 100,
+    },
+    endingSharpness: {
       type: "integer",
       minimum: 0,
       maximum: 100,
@@ -123,9 +149,6 @@ const QUALITY_SCHEMA = {
       minimum: 0,
       maximum: 100,
     },
-    openingBlurDetected: {
-      type: "boolean",
-    },
     architectureChanged: {
       type: "boolean",
     },
@@ -135,19 +158,13 @@ const QUALITY_SCHEMA = {
     furnitureOrFixtureChanged: {
       type: "boolean",
     },
-    textureDriftDetected: {
-      type: "boolean",
-    },
-    smallObjectDriftDetected: {
-      type: "boolean",
-    },
-    materialDriftDetected: {
-      type: "boolean",
-    },
-    exteriorDriftDetected: {
+    vegetationDriftDetected: {
       type: "boolean",
     },
     lightingFlickerDetected: {
+      type: "boolean",
+    },
+    excessiveMotionDetected: {
       type: "boolean",
     },
     problems: {
@@ -164,10 +181,14 @@ const QUALITY_SCHEMA = {
   },
 } as const;
 
-function text(value: unknown): string {
-  return typeof value === "string"
+function text(
+  value: unknown,
+  fallback = ""
+): string {
+  return typeof value === "string" &&
+    value.trim().length > 0
     ? value.trim()
-    : "";
+    : fallback;
 }
 
 function risk(
@@ -181,120 +202,38 @@ function risk(
     : fallback;
 }
 
-function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value);
-}
-
-function clampScore(value: unknown): number {
-  const numeric =
+function clampScore(
+  value: unknown,
+  fallback = 50
+): number {
+  const numberValue =
     typeof value === "number" &&
     Number.isFinite(value)
       ? value
-      : 0;
+      : fallback;
 
   return Math.max(
     0,
-    Math.min(100, Math.round(numeric))
+    Math.min(100, Math.round(numberValue))
   );
 }
 
-function normalizeAnalysis(
-  raw: QualityAnalysis
-): QualityAnalysis {
-  const problems = Array.isArray(raw.problems)
-    ? raw.problems
-        .filter(
-          (item): item is string =>
-            typeof item === "string" &&
-            item.trim().length > 0
-        )
-        .map((item) => item.trim())
-        .slice(0, 20)
-    : [];
+function stringList(
+  value: unknown,
+  max = 20
+): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
 
-  const strengths = Array.isArray(raw.strengths)
-    ? raw.strengths
-        .filter(
-          (item): item is string =>
-            typeof item === "string" &&
-            item.trim().length > 0
-        )
-        .map((item) => item.trim())
-        .slice(0, 20)
-    : [];
-
-  const overallScore = clampScore(
-  raw.overallScore
-);
-
-const sharpnessScore = clampScore(
-  raw.sharpnessScore
-);
-
-const openingBlurDetected =
-  raw.openingBlurDetected === true ||
-  sharpnessScore < 88;
-
-const hardFailure =
-  openingBlurDetected ||
-  raw.architectureChanged === true ||
-  raw.geometryWarpDetected === true ||
-  raw.furnitureOrFixtureChanged === true ||
-  raw.textureDriftDetected === true ||
-  raw.smallObjectDriftDetected === true ||
-  raw.materialDriftDetected === true ||
-  raw.exteriorDriftDetected === true;
-
-  return {
-    pass:
-      raw.pass === true &&
-      !hardFailure &&
-      overallScore >= 82,
-    overallScore,
-    sharpnessScore: clampScore(
-      raw.sharpnessScore
-    ),
-    architectureScore: clampScore(
-      raw.architectureScore
-    ),
-    geometryScore: clampScore(
-      raw.geometryScore
-    ),
-    continuityScore: clampScore(
-      raw.continuityScore
-    ),
-    motionScore: clampScore(
-      raw.motionScore
-    ),
-    flickerScore: clampScore(
-      raw.flickerScore
-    ),
-    openingBlurDetected:
-      raw.openingBlurDetected === true,
-    architectureChanged:
-      raw.architectureChanged === true,
-    geometryWarpDetected:
-      raw.geometryWarpDetected === true,
-    furnitureOrFixtureChanged:
-      raw.furnitureOrFixtureChanged === true,
-    textureDriftDetected:
-      raw.textureDriftDetected === true,
-    smallObjectDriftDetected:
-      raw.smallObjectDriftDetected === true,
-    materialDriftDetected:
-      raw.materialDriftDetected === true,
-    exteriorDriftDetected:
-      raw.exteriorDriftDetected === true,
-    lightingFlickerDetected:
-      raw.lightingFlickerDetected === true,
-    problems,
-    strengths,
-    retryPrompt:
-      typeof raw.retryPrompt === "string" &&
-      raw.retryPrompt.trim()
-        ? raw.retryPrompt.trim()
-        : "Regenerate with less motion, a fully sharp opening frame, and stricter preservation of every visible architectural line, object, material, and furniture position.",
-  };
+  return value
+    .filter(
+      (item): item is string =>
+        typeof item === "string" &&
+        item.trim().length > 0
+    )
+    .map((item) => item.trim())
+    .slice(0, max);
 }
 
 function extractOutputText(
@@ -322,699 +261,721 @@ function extractOutputText(
   return "";
 }
 
-async function runCommand(
-  command: string,
-  args: string[]
-): Promise<void> {
-  await new Promise<void>(
-    (resolve, reject) => {
-      const child = spawn(command, args, {
-        stdio: [
-          "ignore",
-          "ignore",
-          "pipe",
-        ],
-      });
-
-      let stderr = "";
-
-      child.stderr.on("data", (chunk) => {
-        stderr += String(chunk);
-      });
-
-      child.on("error", reject);
-
-      child.on("close", (code) => {
-        if (code === 0) {
-          resolve();
-          return;
-        }
-
-        reject(
-          new Error(
-            `${command} failed with code ${code}: ${stderr}`
-          )
-        );
-      });
-    }
-  );
-}
-
-async function downloadToFile(
-  url: string,
+function mimeFromPath(
   filePath: string
-): Promise<void> {
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(
-      `Could not download media: ${response.status}`
-    );
-  }
-
-  const buffer = Buffer.from(
-    await response.arrayBuffer()
-  );
-
-  await writeFile(filePath, buffer);
-}
-
-async function resolveSourceImage(
-  sourceImageUrl: string,
-  workDir: string
-): Promise<string> {
-  if (isHttpUrl(sourceImageUrl)) {
-    const response = await fetch(
-      sourceImageUrl
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Could not download source image: ${response.status}`
-      );
-    }
-
-    const contentType =
-      response.headers.get("content-type") ?? "";
-
-    const extension = contentType.includes(
-      "png"
-    )
-      ? ".png"
-      : contentType.includes("webp")
-        ? ".webp"
-        : ".jpg";
-
-    const filePath = path.join(
-      workDir,
-      `source${extension}`
-    );
-
-    const buffer = Buffer.from(
-      await response.arrayBuffer()
-    );
-
-    await writeFile(filePath, buffer);
-
-    return filePath;
-  }
-
-  if (!sourceImageUrl.startsWith("/")) {
-    throw new Error(
-      "The source image path is invalid."
-    );
-  }
-
-  const localPath = path.join(
-    process.cwd(),
-    "public",
-    sourceImageUrl.replace(/^\/+/, "")
-  );
-
-  await stat(localPath);
-
-  return localPath;
-}
-
-async function imageToDataUrl(
-  filePath: string
-): Promise<string> {
-  const buffer = await readFile(filePath);
+): string {
   const extension = path
     .extname(filePath)
     .toLowerCase();
 
-  const mime =
-    extension === ".png"
-      ? "image/png"
-      : extension === ".webp"
-        ? "image/webp"
-        : "image/jpeg";
+  if (extension === ".png") {
+    return "image/png";
+  }
+
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+
+  return "image/jpeg";
+}
+
+async function fileToDataUrl(
+  filePath: string
+): Promise<string> {
+  const buffer = await readFile(filePath);
+  const mime = mimeFromPath(filePath);
 
   return `data:${mime};base64,${buffer.toString(
     "base64"
   )}`;
 }
 
+async function downloadToFile(
+  url: string,
+  outputPath: string
+): Promise<void> {
+  const response = await fetch(url, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Download failed with status ${response.status}.`
+    );
+  }
+
+  const arrayBuffer =
+    await response.arrayBuffer();
+
+  await writeFile(
+    outputPath,
+    Buffer.from(arrayBuffer)
+  );
+}
+
+async function resolveSourceImage(
+  sourceImageUrl: string,
+  tempDirectory: string
+): Promise<string> {
+  if (/^https?:\/\//i.test(sourceImageUrl)) {
+    const extension =
+      path.extname(
+        new URL(sourceImageUrl).pathname
+      ) || ".jpg";
+
+    const outputPath = path.join(
+      tempDirectory,
+      `source${extension}`
+    );
+
+    await downloadToFile(
+      sourceImageUrl,
+      outputPath
+    );
+
+    return outputPath;
+  }
+
+  if (!sourceImageUrl.startsWith("/")) {
+    throw new Error(
+      "The source image must be an HTTP URL or a public path beginning with '/'."
+    );
+  }
+
+  return path.join(
+    process.cwd(),
+    "public",
+    sourceImageUrl.replace(/^\/+/, "")
+  );
+}
+
 async function getVideoDuration(
   videoPath: string
 ): Promise<number> {
-  return await new Promise<number>(
-    (resolve, reject) => {
-      const child = spawn(
-        "ffprobe",
-        [
-          "-v",
-          "error",
-          "-show_entries",
-          "format=duration",
-          "-of",
-          "default=noprint_wrappers=1:nokey=1",
-          videoPath,
-        ],
-        {
-          stdio: [
-            "ignore",
-            "pipe",
-            "pipe",
-          ],
-        }
-      );
+  const { stdout } =
+    await execFileAsync(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        videoPath,
+      ],
+      {
+        maxBuffer: 1024 * 1024,
+      }
+    );
 
-      let stdout = "";
-      let stderr = "";
+  const duration =
+    Number.parseFloat(stdout.trim());
 
-      child.stdout.on(
-        "data",
-        (chunk) => {
-          stdout += String(chunk);
-        }
-      );
+  if (
+    !Number.isFinite(duration) ||
+    duration <= 0
+  ) {
+    throw new Error(
+      "FFprobe could not determine the clip duration."
+    );
+  }
 
-      child.stderr.on(
-        "data",
-        (chunk) => {
-          stderr += String(chunk);
-        }
-      );
-
-      child.on("error", reject);
-
-      child.on("close", (code) => {
-        if (code !== 0) {
-          reject(
-            new Error(
-              `ffprobe failed: ${stderr}`
-            )
-          );
-          return;
-        }
-
-        const duration =
-          Number.parseFloat(stdout.trim());
-
-        if (
-          !Number.isFinite(duration) ||
-          duration <= 0
-        ) {
-          reject(
-            new Error(
-              "Could not determine video duration."
-            )
-          );
-          return;
-        }
-
-        resolve(duration);
-      });
-    }
-  );
+  return duration;
 }
 
 async function extractFrame(
   videoPath: string,
-  outputPath: string,
-  timestamp: number
+  seconds: number,
+  outputPath: string
 ): Promise<void> {
-  await runCommand("ffmpeg", [
-    "-y",
-    "-ss",
-    timestamp.toFixed(3),
-    "-i",
-    videoPath,
-    "-frames:v",
-    "1",
-    "-vf",
-    "scale=1280:-2",
-    "-q:v",
-    "2",
-    outputPath,
-  ]);
+  await execFileAsync(
+    "ffmpeg",
+    [
+      "-y",
+      "-ss",
+      seconds.toFixed(3),
+      "-i",
+      videoPath,
+      "-frames:v",
+      "1",
+      "-vf",
+      "scale='min(1280,iw)':-2",
+      "-q:v",
+      "2",
+      outputPath,
+    ],
+    {
+      maxBuffer: 8 * 1024 * 1024,
+    }
+  );
 }
 
-function buildInspectorPrompt(
-  category: string,
-  distortionRisk: RiskLevel,
-  blurRisk: RiskLevel
-): string {
+function buildSystemPrompt(args: {
+  category: string;
+  distortionRisk: RiskLevel;
+  blurRisk: RiskLevel;
+}): string {
   return `
-You are WalkNWow's strict real-estate video quality inspector.
+You are WalkNWow Quality V3, a ruthless real-estate video quality inspector.
 
-You will receive:
-1. The original listing photo.
-2. A frame near the beginning of the generated clip.
-3. A frame from the middle.
-4. A frame near the end.
+You will compare:
+1. the original source listing photo
+2. an opening video frame
+3. a middle video frame
+4. an ending video frame
 
-SCENE CONTEXT
-Category: ${category || "other"}
-Expected distortion risk: ${distortionRisk}
-Expected blur risk: ${blurRisk}
+The property category is: ${args.category}
+Expected distortion risk: ${args.distortionRisk}
+Expected blur risk: ${args.blurRisk}
 
-CHECK THESE AREAS
+Your job is to protect the real property from AI hallucination and temporal instability.
 
-1. SHARPNESS
-The opening frame must already be sharp.
-Reject visible opening blur, focus settling, smeared edges, or soft details.
+FAIL THE CLIP when any meaningful issue is visible:
+- blurry or unresolved opening frame
+- focus settling or sharpening ramp
+- soft middle or ending frame
+- added or removed objects
+- moved furniture
+- changed fixtures, cabinetry, countertops, appliances, windows, or doors
+- changed roof, siding, walls, floors, trim, railings, stairs, mirrors, or glass
+- bent walls, warped straight lines, or stretched room proportions
+- inconsistent reflections
+- flickering light or exposure
+- aggressive camera movement
+- perspective movement that reveals invented unseen areas
 
-2. ARCHITECTURAL ACCURACY
-Compare all generated frames directly with the original image.
-Reject changes to siding, rooflines, windows, doors, walls, ceilings, stairs, railings, cabinets, countertops, appliances, fixtures, mirrors, glass, flooring, furniture, landscaping, pools, fences, horizons, or views.
+NATURE / EXTERIOR LOCK
 
-3. GEOMETRY
-Reject warped walls, bending cabinets, moving windows, curved doors, stretched furniture, shifting room proportions, or impossible geometry.
+Everything outdoors and everything visible through windows or glass is locked source-image content.
 
-4. CONTINUITY
-Objects, materials, colors, fixtures, lighting, and furniture positions must remain consistent.
+Inspect trees, trunks, branches, leaves, bushes, shrubs, grass, flowers, landscaping, fences, decks, neighboring structures, sky, clouds, water, horizon, distant scenery, and outdoor reflections.
 
-5. MOTION
-Motion should resemble a slow stabilized gimbal glide.
-Reject aggressive zooming, orbiting, spinning, impossible flying, abrupt movement, or excessive perspective change.
+Set vegetationDriftDetected=true and FAIL the clip if:
+- tree trunks or major branches change shape, thickness, location, angle, or count
+- branches appear, disappear, split, merge, bend, stretch, or relocate
+- foliage boils, crawls, shimmers, pulses, melts, morphs, flickers, or regenerates
+- bushes or shrubs change silhouette, boundary, size, position, or texture
+- grass smears, crawls, flickers, changes pattern, or moves unnaturally
+- plants, flowers, trees, branches, or landscaping appear or disappear
+- window views change composition
+- fences, decks, neighboring structures, horizons, or exterior objects move or morph
+- reflections in windows or glass stop matching the exterior scene
+- sky or cloud behavior creates obvious AI instability
+- any natural element visibly changes identity between frames
 
-6. MICRO-DETAIL PRESERVATION
-   Compare fine details directly against the original listing photo.
-   Couch fabric, upholstery texture, cushion seams, pillows, blankets, rugs, flooring grain, stone texture, wood grain, countertop patterns, cabinet handles, appliance details, trim, railings, artwork, and decor must remain visually identical.
-   Set textureDriftDetected=true when textures, seams, patterns, grain, or fine surface details visibly change.
-   Set materialDriftDetected=true when a material changes color, finish, reflectivity, pattern, texture, or construction.
-
-7. SMALL OBJECT PRESERVATION
-   Every visible small object must keep the same shape, count, color, position, and orientation.
-   Inspect coffee tables, dining tables, countertops, shelves, fireplace mantels, lamps, bottles, remotes, decor, handles, controls, artwork, and accessories.
-   Set smallObjectDriftDetected=true if anything appears, disappears, moves, changes shape, merges, splits, or morphs.
-
-8. EXTERIOR AND WINDOW-VIEW PRESERVATION
-   Treat everything outdoors and everything visible through windows, doors, and glass as locked source-image content.
-
-   Trees, trunks, branches, leaves, bushes, shrubs, grass, flowers, landscaping, decks, fences, neighboring structures, sky, clouds, water, horizons, distant scenery, and outdoor reflections must remain visually stable and consistent with the original listing photo.
-
-   TREE AND VEGETATION RULES:
-   - Tree trunks must keep the same shape, thickness, angle, position, and count.
-   - Major branches must keep the same structure, location, shape, and count.
-   - Do not invent, remove, merge, split, stretch, bend, or relocate branches.
-   - Leaves and foliage may have only extremely subtle natural movement.
-   - Reject foliage that boils, crawls, shimmers, pulses, melts, morphs, flickers, regenerates, or changes density.
-   - Bushes and shrubs must preserve the same silhouette, size, boundary, texture, and position.
-   - Grass must remain stable and must not smear, crawl, flicker, regenerate, or wave unnaturally.
-   - No new trees, plants, flowers, branches, bushes, or landscaping may appear.
-   - Existing landscaping must not disappear or change identity.
-   - Window views must preserve the same trees, structures, horizon, landscaping, and composition.
-   - Exterior reflections in windows or glass must remain consistent with the real outdoor scene.
-   - Sky and clouds must not create obvious artificial motion or temporal instability.
-   - Do not excuse obvious vegetation instability as wind.
-
-   Tiny realistic leaf movement is acceptable only when the tree identity, trunk, branch structure, foliage silhouette, density, and position remain stable.
-
-   Set exteriorDriftDetected=true if ANY tree, branch, foliage mass, bush, grass area, landscaping feature, outdoor reflection, sky detail, structure, horizon, or exterior view changes unnaturally or looks AI-generated between frames.
-
-9. FLICKER
-   Reject lighting flicker, texture flicker, object popping, unstable materials, or temporal crawling.
+Tiny natural leaf movement is acceptable only when tree identity, branch structure, foliage silhouette, density, and position remain stable.
+Do not excuse obvious vegetation instability as wind.
 
 SCORING
-Use 0–100 scores.
-A client-ready clip should score at least 82 overall.
-Any architecture change, geometry warp, furniture or fixture change, texture drift, small-object drift, material drift, exterior drift, or obvious opening blur is an automatic failure.
+
+100 means visually faithful and professional.
+90–99 means excellent.
+82–89 means acceptable.
+Below 82 should normally fail.
+
+Any clear architecture change, geometry warp, furniture or fixture change, vegetation drift, or opening blur is an automatic failure even when the average score is high.
+
+SHARPNESS
+
+The opening, middle, and ending frames must all be fully resolved and crisp.
+Do not average away a soft section. If any sampled frame is visibly softer, smeared, unresolved, or loses fine texture compared with the source, score that frame below 90.
+A clip that starts sharp but becomes soft later is not client-ready.
+
+MOTION
+
+The desired camera behavior is restrained, nearly static professional gimbal movement.
+Penalize aggressive forward motion, lateral sweeps, orbiting, panning, tilting, rolling, zooming, or perspective jumps.
 
 RETRY PROMPT
-When the clip fails, provide one concise regeneration instruction that directly addresses the problems.
-Return strict JSON matching the required schema.
+
+When vegetationDriftDetected=true, explicitly tell the generator to lock tree trunks, branch structure, foliage silhouettes, bushes, grass, landscaping, window views, and exterior reflections to the source image with nearly zero environmental motion.
+When there is any other failure, write one concise corrective regeneration instruction.
+When the clip is excellent, retryPrompt may say that no retry is required.
+
+Return strict JSON matching the supplied schema.
 `;
 }
 
-function fallbackAnalysis(
-  reason: string
+async function inspectWithOpenAI(args: {
+  apiKey: string;
+  model: string;
+  category: string;
+  distortionRisk: RiskLevel;
+  blurRisk: RiskLevel;
+  sourceImageDataUrl: string;
+  openingFrameDataUrl: string;
+  middleFrameDataUrl: string;
+  endingFrameDataUrl: string;
+}): Promise<ModelAnalysis> {
+  const response = await fetch(
+    "https://api.openai.com/v1/responses",
+    {
+      method: "POST",
+      headers: {
+        Authorization:
+          `Bearer ${args.apiKey}`,
+        "Content-Type":
+          "application/json",
+      },
+      body: JSON.stringify({
+        model: args.model,
+        input: [
+          {
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: buildSystemPrompt({
+                  category: args.category,
+                  distortionRisk:
+                    args.distortionRisk,
+                  blurRisk: args.blurRisk,
+                }),
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text:
+                  "ORIGINAL SOURCE LISTING PHOTO",
+              },
+              {
+                type: "input_image",
+                image_url:
+                  args.sourceImageDataUrl,
+                detail: "high",
+              },
+              {
+                type: "input_text",
+                text:
+                  "VIDEO OPENING FRAME",
+              },
+              {
+                type: "input_image",
+                image_url:
+                  args.openingFrameDataUrl,
+                detail: "high",
+              },
+              {
+                type: "input_text",
+                text:
+                  "VIDEO MIDDLE FRAME",
+              },
+              {
+                type: "input_image",
+                image_url:
+                  args.middleFrameDataUrl,
+                detail: "high",
+              },
+              {
+                type: "input_text",
+                text:
+                  "VIDEO ENDING FRAME",
+              },
+              {
+                type: "input_image",
+                image_url:
+                  args.endingFrameDataUrl,
+                detail: "high",
+              },
+            ],
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name:
+              "walknwow_quality_v3",
+            strict: true,
+            schema: QUALITY_SCHEMA,
+          },
+        },
+        max_output_tokens: 3500,
+      }),
+    }
+  );
+
+  const data =
+    (await response.json()) as OpenAIResponse;
+
+  if (!response.ok) {
+    throw new Error(
+      data.error?.message ??
+        `OpenAI returned status ${response.status}.`
+    );
+  }
+
+  const outputText =
+    extractOutputText(data);
+
+  if (!outputText) {
+    throw new Error(
+      "OpenAI returned no quality analysis."
+    );
+  }
+
+  try {
+    return JSON.parse(
+      outputText
+    ) as ModelAnalysis;
+  } catch {
+    throw new Error(
+      "OpenAI returned invalid quality JSON."
+    );
+  }
+}
+
+function normalizeAnalysis(
+  raw: ModelAnalysis
 ): QualityAnalysis {
+  const blur = assessBlurFromScores(
+    clampScore(raw.openingSharpness),
+    clampScore(raw.middleSharpness)
+  );
+
+  const architecture =
+    assessArchitecture({
+      architectureScore:
+        clampScore(
+          raw.architectureScore
+        ),
+      furnitureChanged:
+        raw.furnitureOrFixtureChanged,
+      problems:
+        raw.architectureChanged
+          ? stringList(raw.problems)
+          : [],
+    });
+
+  const geometry =
+    assessGeometry(
+      clampScore(raw.geometryScore),
+      raw.geometryWarpDetected
+        ? stringList(raw.problems)
+        : []
+    );
+
+  const scores = {
+    sharpnessScore:
+      clampScore(
+        Math.round(
+          clampScore(
+            raw.openingSharpness
+          ) *
+            0.5 +
+            clampScore(
+              raw.middleSharpness
+            ) *
+              0.3 +
+            clampScore(
+              raw.endingSharpness
+            ) *
+              0.2
+        )
+      ),
+    architectureScore:
+      architecture.architectureScore,
+    geometryScore:
+      geometry.geometryScore,
+    continuityScore:
+      clampScore(raw.continuityScore),
+    motionScore:
+      clampScore(raw.motionScore),
+    flickerScore:
+      clampScore(raw.flickerScore),
+  };
+
+  const overallScore =
+    calculateOverallQuality(scores);
+
+  const architectureChanged =
+    raw.architectureChanged ||
+    architecture.architectureChanged;
+
+  const geometryWarpDetected =
+    raw.geometryWarpDetected ||
+    geometry.geometryWarpDetected;
+
+  const furnitureOrFixtureChanged =
+    raw.furnitureOrFixtureChanged ||
+    architecture.furnitureOrFixtureChanged;
+
+  const openingBlurDetected =
+    raw.openingSharpness < 90 ||
+    blur.openingBlurDetected;
+
+  const middleBlurDetected =
+    raw.middleSharpness < 90;
+
+  const endingBlurDetected =
+    raw.endingSharpness < 90;
+
+  const fullClipSharpnessFailure =
+    openingBlurDetected ||
+    middleBlurDetected ||
+    endingBlurDetected ||
+    scores.sharpnessScore < 90;
+
+  const vegetationDriftDetected =
+    raw.vegetationDriftDetected === true;
+
+  const lightingFlickerDetected =
+    raw.lightingFlickerDetected ||
+    scores.flickerScore < 78;
+
+  const problems =
+    stringList(raw.problems, 25);
+
+  if (
+    raw.excessiveMotionDetected &&
+    !problems.some((problem) =>
+      problem.toLowerCase().includes(
+        "motion"
+      )
+    )
+  ) {
+    problems.push(
+      "Camera movement is too aggressive."
+    );
+  }
+
+  const pass =
+    !shouldRejectQuality({
+      overallScore,
+      openingBlurDetected:
+        fullClipSharpnessFailure,
+      architectureChanged,
+      geometryWarpDetected,
+      furnitureOrFixtureChanged,
+    }) &&
+    !fullClipSharpnessFailure &&
+    !vegetationDriftDetected &&
+    !lightingFlickerDetected &&
+    !raw.excessiveMotionDetected &&
+    scores.motionScore >= 78;
+
   return {
-    pass: false,
-    overallScore: 0,
-    sharpnessScore: 0,
-    architectureScore: 0,
-    geometryScore: 0,
-    continuityScore: 0,
-    motionScore: 0,
-    flickerScore: 0,
-    openingBlurDetected: false,
-    architectureChanged: false,
-    geometryWarpDetected: false,
-    furnitureOrFixtureChanged: false,
-    textureDriftDetected: false,
-    smallObjectDriftDetected: false,
-    materialDriftDetected: false,
-    exteriorDriftDetected: false,
-    lightingFlickerDetected: false,
-    problems: [
-      `Automatic inspection could not complete: ${reason}`,
-    ],
-    strengths: [],
+    pass,
+    overallScore,
+    ...scores,
+    openingSharpness: clampScore(raw.openingSharpness),
+    middleSharpness: clampScore(raw.middleSharpness),
+    endingSharpness: clampScore(raw.endingSharpness),
+    openingBlurDetected,
+    middleBlurDetected,
+    endingBlurDetected,
+    architectureChanged,
+    geometryWarpDetected,
+    furnitureOrFixtureChanged,
+    vegetationDriftDetected,
+    lightingFlickerDetected,
+    problems,
+    strengths:
+      stringList(raw.strengths, 20),
     retryPrompt:
-      "Regenerate with an immediately sharp first frame, extremely restrained stabilized forward motion, and strict preservation of every visible architectural line, object, material, fixture, and furniture position.",
+      text(
+        raw.retryPrompt,
+        pass
+          ? "No retry required."
+          : "Regenerate with almost-static camera movement. Preserve every object, architectural line, material, fixture, furnishing, reflection, tree trunk, branch structure, foliage silhouette, grass area, landscape element, and window view exactly. Begin fully sharp. Use nearly zero environmental motion. Do not add, remove, move, morph, shimmer, boil, or redesign anything."
+      ),
   };
 }
 
 export async function POST(
   request: Request
 ) {
-  const workDir = path.join(
-    os.tmpdir(),
-    `walknwow-quality-${crypto.randomUUID()}`
-  );
+  let tempDirectory = "";
 
   try {
     const body =
       (await request.json()) as QualityRequest;
 
-    const sourceImageUrl = text(
-      body.sourceImageUrl
-    );
+    const sourceImageUrl =
+      text(body.sourceImageUrl);
 
-    const videoUrl = text(
-      body.videoUrl
-    );
+    const videoUrl =
+      text(body.videoUrl);
 
-    if (!sourceImageUrl || !videoUrl) {
+    if (!sourceImageUrl) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "sourceImageUrl and videoUrl are required.",
+            "sourceImageUrl is required.",
         },
         { status: 400 }
       );
     }
 
-    if (!isHttpUrl(videoUrl)) {
+    if (!videoUrl) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "videoUrl must be an HTTP or HTTPS URL.",
+            "videoUrl is required.",
         },
         { status: 400 }
       );
     }
 
-    const openAIKey =
+    const apiKey =
       process.env.OPENAI_API_KEY?.trim();
 
-    if (!openAIKey) {
-      return NextResponse.json({
-        success: true,
-        analysis: fallbackAnalysis(
-          "OPENAI_API_KEY is missing."
-        ),
-        usedFallback: true,
-      });
+    if (!apiKey) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "OPENAI_API_KEY is missing.",
+        },
+        { status: 500 }
+      );
     }
 
-    await mkdir(workDir, {
-      recursive: true,
-    });
-
-    const sourceImagePath =
-      await resolveSourceImage(
-        sourceImageUrl,
-        workDir
+    tempDirectory =
+      await mkdtemp(
+        path.join(
+          os.tmpdir(),
+          "walknwow-quality-"
+        )
       );
 
-    const videoPath = path.join(
-      workDir,
-      "generated.mp4"
-    );
+    const videoPath =
+      path.join(
+        tempDirectory,
+        "clip.mp4"
+      );
 
     await downloadToFile(
       videoUrl,
       videoPath
     );
 
+    const sourceImagePath =
+      await resolveSourceImage(
+        sourceImageUrl,
+        tempDirectory
+      );
+
     const duration =
-      await getVideoDuration(videoPath);
+      await getVideoDuration(
+        videoPath
+      );
 
-    const openingTime = Math.min(
-      Math.max(0.1, duration * 0.04),
-      Math.max(0.1, duration - 0.2)
-    );
+    const openingTime =
+      Math.min(
+        Math.max(0.05, duration * 0.04),
+        Math.max(0.05, duration - 0.1)
+      );
 
-    const quarterTime = Math.min(
-  Math.max(0.15, duration * 0.25),
-  Math.max(0.15, duration - 0.18)
-);
+    const middleTime =
+      Math.max(
+        0.05,
+        duration * 0.5
+      );
 
-const middleTime = Math.min(
-  Math.max(0.2, duration * 0.5),
-  Math.max(0.2, duration - 0.15)
-);
+    const endingTime =
+      Math.max(
+        0.05,
+        duration - 0.12
+      );
 
-const threeQuarterTime = Math.min(
-  Math.max(0.22, duration * 0.75),
-  Math.max(0.22, duration - 0.12)
-);
+    const openingPath =
+      path.join(
+        tempDirectory,
+        "opening.jpg"
+      );
 
-const endingTime = Math.min(
-  Math.max(0.25, duration * 0.9),
-  Math.max(0.25, duration - 0.08)
-);
+    const middlePath =
+      path.join(
+        tempDirectory,
+        "middle.jpg"
+      );
 
-const openingPath = path.join(
-  workDir,
-  "opening.jpg"
-);
+    const endingPath =
+      path.join(
+        tempDirectory,
+        "ending.jpg"
+      );
 
-const quarterPath = path.join(
-  workDir,
-  "quarter.jpg"
-);
+    await Promise.all([
+      extractFrame(
+        videoPath,
+        openingTime,
+        openingPath
+      ),
+      extractFrame(
+        videoPath,
+        middleTime,
+        middlePath
+      ),
+      extractFrame(
+        videoPath,
+        endingTime,
+        endingPath
+      ),
+    ]);
 
-const middlePath = path.join(
-  workDir,
-  "middle.jpg"
-);
+    const [
+      sourceImageDataUrl,
+      openingFrameDataUrl,
+      middleFrameDataUrl,
+      endingFrameDataUrl,
+    ] = await Promise.all([
+      fileToDataUrl(
+        sourceImagePath
+      ),
+      fileToDataUrl(
+        openingPath
+      ),
+      fileToDataUrl(
+        middlePath
+      ),
+      fileToDataUrl(
+        endingPath
+      ),
+    ]);
 
-const threeQuarterPath = path.join(
-  workDir,
-  "three-quarter.jpg"
-);
-
-const endingPath = path.join(
-  workDir,
-  "ending.jpg"
-);
-
-await extractFrame(
-  videoPath,
-  openingPath,
-  openingTime
-);
-
-await extractFrame(
-  videoPath,
-  quarterPath,
-  quarterTime
-);
-
-await extractFrame(
-  videoPath,
-  middlePath,
-  middleTime
-);
-
-await extractFrame(
-  videoPath,
-  threeQuarterPath,
-  threeQuarterTime
-);
-
-await extractFrame(
-  videoPath,
-  endingPath,
-  endingTime
-);
-
-const sourceDataUrl =
-  await imageToDataUrl(
-    sourceImagePath
-  );
-
-const openingDataUrl =
-  await imageToDataUrl(
-    openingPath
-  );
-
-const quarterDataUrl =
-  await imageToDataUrl(
-    quarterPath
-  );
-
-const middleDataUrl =
-  await imageToDataUrl(
-    middlePath
-  );
-
-const threeQuarterDataUrl =
-  await imageToDataUrl(
-    threeQuarterPath
-  );
-
-const endingDataUrl =
-  await imageToDataUrl(
-    endingPath
-  );
-
-const distortionRisk = risk(
-      body.distortionRisk,
-      "medium"
-    );
-
-    const blurRisk = risk(
-      body.blurRisk,
-      "medium"
-    );
-
-    const response = await fetch(
-      "https://api.openai.com/v1/responses",
-      {
-        method: "POST",
-        headers: {
-          Authorization:
-            `Bearer ${openAIKey}`,
-          "Content-Type":
-            "application/json",
-        },
-        body: JSON.stringify({
-          model:
-            process.env
-              .OPENAI_VISION_MODEL
-              ?.trim() ||
-            "gpt-4.1-mini",
-          input: [
-            {
-              role: "system",
-              content: [
-                {
-                  type: "input_text",
-                  text: buildInspectorPrompt(
-                    text(body.category),
-                    distortionRisk,
-                    blurRisk
-                  ),
-                },
-              ],
-            },
-            {
-              role: "user",
-              content: [
-                {
-                  type: "input_text",
-                  text:
-                    "ORIGINAL LISTING PHOTO",
-                },
-                {
-                  type: "input_image",
-                  image_url:
-                    sourceDataUrl,
-                  detail: "high",
-                },
-                {
-                  type: "input_text",
-                  text:
-                    "GENERATED OPENING FRAME",
-                },
-                {
-                  type: "input_image",
-                  image_url:
-                    openingDataUrl,
-                  detail: "high",
-                },
-                {
-                  type: "input_text",
-                  text:
-                    "GENERATED MIDDLE FRAME",
-                },
-                {
-                  type: "input_image",
-                  image_url:
-                    middleDataUrl,
-                  detail: "high",
-                },
-                {
-                  type: "input_text",
-                  text:
-                    "GENERATED ENDING FRAME",
-                },
-                {
-                  type: "input_image",
-                  image_url:
-                    endingDataUrl,
-                  detail: "high",
-                },
-              ],
-            },
-          ],
-          text: {
-            format: {
-              type: "json_schema",
-              name:
-                "walknwow_quality_analysis",
-              strict: true,
-              schema: QUALITY_SCHEMA,
-            },
-          },
-          temperature: 0.1,
-          max_output_tokens: 3000,
-        }),
-      }
-    );
-
-    const responseData =
-      (await response.json()) as OpenAIResponse;
-
-    if (!response.ok) {
-      const message =
-        responseData.error?.message ??
-        `OpenAI returned status ${response.status}.`;
-
-      return NextResponse.json({
-        success: true,
-        analysis:
-          fallbackAnalysis(message),
-        usedFallback: true,
+    const rawAnalysis =
+      await inspectWithOpenAI({
+        apiKey,
+        model:
+          process.env
+            .OPENAI_QUALITY_MODEL
+            ?.trim() ||
+          "gpt-4.1-mini",
+        category:
+          text(body.category, "other"),
+        distortionRisk:
+          risk(
+            body.distortionRisk,
+            "medium"
+          ),
+        blurRisk:
+          risk(
+            body.blurRisk,
+            "medium"
+          ),
+        sourceImageDataUrl,
+        openingFrameDataUrl,
+        middleFrameDataUrl,
+        endingFrameDataUrl,
       });
-    }
-
-    const outputText =
-      extractOutputText(responseData);
-
-    if (!outputText) {
-      return NextResponse.json({
-        success: true,
-        analysis: fallbackAnalysis(
-          "OpenAI returned no structured quality result."
-        ),
-        usedFallback: true,
-      });
-    }
-
-    let parsed: QualityAnalysis;
-
-    try {
-      parsed = JSON.parse(
-        outputText
-      ) as QualityAnalysis;
-    } catch {
-      return NextResponse.json({
-        success: true,
-        analysis: fallbackAnalysis(
-          "OpenAI returned invalid JSON."
-        ),
-        usedFallback: true,
-      });
-    }
 
     const analysis =
-      normalizeAnalysis(parsed);
+      normalizeAnalysis(
+        rawAnalysis
+      );
 
     return NextResponse.json({
       success: true,
-      usedFallback: false,
       analysis,
+      usedFallback: false,
       sampledFrames: {
         openingSeconds:
           Number(
@@ -1029,10 +990,13 @@ const distortionRisk = risk(
             endingTime.toFixed(3)
           ),
       },
+      message: analysis.pass
+        ? `Quality passed with a score of ${analysis.overallScore}.`
+        : `Quality failed with a score of ${analysis.overallScore}.`,
     });
   } catch (error) {
     console.error(
-      "WalkNWow V2 quality error:",
+      "WalkNWow Quality V3 error:",
       error
     );
 
@@ -1047,9 +1011,14 @@ const distortionRisk = risk(
       { status: 500 }
     );
   } finally {
-    await rm(workDir, {
-      recursive: true,
-      force: true,
-    }).catch(() => undefined);
+    if (tempDirectory) {
+      await rm(
+        tempDirectory,
+        {
+          recursive: true,
+          force: true,
+        }
+      ).catch(() => undefined);
+    }
   }
 }

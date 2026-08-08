@@ -51,12 +51,18 @@ type QualityResponse = {
     pass?: boolean;
     overallScore?: number;
     sharpnessScore?: number;
+    openingSharpness?: number;
+    middleSharpness?: number;
+    endingSharpness?: number;
     architectureScore?: number;
     geometryScore?: number;
     continuityScore?: number;
     motionScore?: number;
     flickerScore?: number;
     openingBlurDetected?: boolean;
+    middleBlurDetected?: boolean;
+    endingBlurDetected?: boolean;
+    vegetationDriftDetected?: boolean;
     architectureChanged?: boolean;
     geometryWarpDetected?: boolean;
     furnitureOrFixtureChanged?: boolean;
@@ -75,10 +81,12 @@ type AttemptResult = {
   taskId: string;
   overallScore: number;
   sharpnessScore: number;
+  minimumFrameSharpness: number;
   motionScore: number;
   architectureChanged: boolean;
   geometryWarpDetected: boolean;
   furnitureOrFixtureChanged: boolean;
+  vegetationDriftDetected: boolean;
   hallucinationFailure: boolean;
   pass: boolean;
   problems: string[];
@@ -208,37 +216,36 @@ function retryRules(
 ): string[] {
   if (attemptNumber === 1) {
     return [
-      "Animate the existing photograph only. Do not create a new scene.",
-      "Keep the camera locked and preserve every visible object exactly.",
-      "Do not add artwork, paintings, plants, lamps, furniture, fixtures, or decorations.",
+      "Create a real stabilized walkthrough using a slow forward camera translation and subtle natural parallax.",
+      "Do not fake movement with a flat zoom or panoramic still-image pan.",
+      "Keep every frame fully sharp from beginning through middle to end.",
+      "Preserve every visible object, architectural line, material, tree, branch, landscape element, reflection, and window view.",
+      "Do not add, remove, restage, redesign, or invent anything.",
     ];
   }
 
   if (attemptNumber === 2) {
     return [
-      "STRICT RETRY: Keep the camera completely stationary.",
-      "Do not add, remove, move, recolor, resize, replace, or redesign anything.",
-      "No new paintings, artwork, wall decor, plants, pillows, lamps, furniture, fixtures, windows, doors, or landscaping.",
-      "Preserve every visible element in the exact same position and count.",
+      "QUALITY RETRY: reduce camera travel while keeping a real forward walkthrough translation with subtle parallax.",
+      "Keep opening, middle, and ending frames equally crisp and resolved.",
+      "No focus pull, motion smear, softening, depth-of-field blur, or texture regeneration.",
+      "Preserve exact architecture, furniture, object count, materials, trees, branches, landscaping, reflections, and views.",
       previousRetryPrompt,
       ...previousProblems.map(
-        (problem) =>
-          `Correct this previous failure: ${problem}`
+        (problem) => `Correct this previous failure: ${problem}`
       ),
     ].filter(Boolean);
   }
 
   return [
-    "MAXIMUM PROPERTY LOCK RETRY.",
-    "Use an ultra-static locked-tripod shot.",
-    "Do not animate any interior object, furniture, decor, reflection, light, fixture, wall, floor, ceiling, window, or door.",
-    "Do not create any new object of any kind.",
-    "The output must remain visually identical to the source image except for nearly imperceptible natural environmental motion already present.",
-    "Preserve exact perspective, architecture, materials, colors, object count, and object placement.",
+    "FINAL FIDELITY RETRY: use only a tiny stabilized forward camera translation with real parallax; do not become a completely static still.",
+    "Prioritize sharpness and source fidelity over movement distance.",
+    "Every sampled frame must remain fully sharp.",
+    "Do not add, remove, move, recolor, resize, replace, redesign, morph, shimmer, or invent anything.",
+    "Lock architecture, furniture, small objects, textures, trees, branches, foliage silhouettes, landscaping, reflections, and window views to the source.",
     previousRetryPrompt,
     ...previousProblems.map(
-      (problem) =>
-        `Eliminate this prior issue: ${problem}`
+      (problem) => `Eliminate this prior issue: ${problem}`
     ),
   ].filter(Boolean);
 }
@@ -458,25 +465,39 @@ export async function POST(
             100
           );
 
+        const minimumFrameSharpness =
+          Math.min(
+            number(analysis.openingSharpness, sharpnessScore, 0, 100),
+            number(analysis.middleSharpness, sharpnessScore, 0, 100),
+            number(analysis.endingSharpness, sharpnessScore, 0, 100)
+          );
+
         const architectureChanged =
-      analysis.architectureChanged === true;
+          analysis.architectureChanged === true;
 
-    const geometryWarpDetected =
-      analysis.geometryWarpDetected === true;
+        const geometryWarpDetected =
+          analysis.geometryWarpDetected === true;
 
-    const furnitureOrFixtureChanged =
-      analysis.furnitureOrFixtureChanged === true;
+        const furnitureOrFixtureChanged =
+          analysis.furnitureOrFixtureChanged === true;
 
-    const hallucinationFailure =
-      architectureChanged ||
-      geometryWarpDetected ||
-      furnitureOrFixtureChanged;
+        const vegetationDriftDetected =
+          analysis.vegetationDriftDetected === true;
 
-    const pass =
-      analysis.pass === true &&
-      score >= passingScore &&
-      !hallucinationFailure &&
-      analysis.openingBlurDetected !== true;
+        const hallucinationFailure =
+          architectureChanged ||
+          geometryWarpDetected ||
+          furnitureOrFixtureChanged ||
+          vegetationDriftDetected;
+
+        const pass =
+          analysis.pass === true &&
+          score >= passingScore &&
+          !hallucinationFailure &&
+          minimumFrameSharpness >= 90 &&
+          analysis.openingBlurDetected !== true &&
+          analysis.middleBlurDetected !== true &&
+          analysis.endingBlurDetected !== true;
 
         const result:
           AttemptResult = {
@@ -491,13 +512,15 @@ export async function POST(
               generation.data.taskId
             ),
           overallScore: score,
-      sharpnessScore,
-      motionScore,
-      architectureChanged,
-      geometryWarpDetected,
-      furnitureOrFixtureChanged,
-      hallucinationFailure,
-      pass,
+          sharpnessScore,
+          minimumFrameSharpness,
+          motionScore,
+          architectureChanged,
+          geometryWarpDetected,
+          furnitureOrFixtureChanged,
+          vegetationDriftDetected,
+          hallucinationFailure,
+          pass,
           problems:
             stringList(
               analysis.problems,
@@ -549,10 +572,12 @@ export async function POST(
           taskId: "",
           overallScore: 0,
           sharpnessScore: 0,
+          minimumFrameSharpness: 0,
           motionScore: 0,
           architectureChanged: false,
           geometryWarpDetected: false,
           furnitureOrFixtureChanged: false,
+          vegetationDriftDetected: false,
           hallucinationFailure: true,
           pass: false,
           problems: [
@@ -606,39 +631,42 @@ export async function POST(
     }
 
     const bestAttempt =
-  [...successfulAttempts].sort(
-    (a, b) => {
-      if (
-        a.hallucinationFailure !==
-        b.hallucinationFailure
-      ) {
-        return a.hallucinationFailure
-          ? 1
-          : -1;
-      }
+      [...successfulAttempts].sort(
+        (a, b) => {
+          if (
+            a.hallucinationFailure !==
+            b.hallucinationFailure
+          ) {
+            return a.hallucinationFailure ? 1 : -1;
+          }
 
-      const overallDifference =
-        b.overallScore -
-        a.overallScore;
+          const minimumSharpnessDifference =
+            b.minimumFrameSharpness -
+            a.minimumFrameSharpness;
 
-      if (overallDifference !== 0) {
-        return overallDifference;
-      }
+          if (minimumSharpnessDifference !== 0) {
+            return minimumSharpnessDifference;
+          }
 
-      const sharpnessDifference =
-        b.sharpnessScore -
-        a.sharpnessScore;
+          const sharpnessDifference =
+            b.sharpnessScore -
+            a.sharpnessScore;
 
-      if (sharpnessDifference !== 0) {
-        return sharpnessDifference;
-      }
+          if (sharpnessDifference !== 0) {
+            return sharpnessDifference;
+          }
 
-      return (
-        b.motionScore -
-        a.motionScore
-      );
-    }
-  )[0];
+          const overallDifference =
+            b.overallScore -
+            a.overallScore;
+
+          if (overallDifference !== 0) {
+            return overallDifference;
+          }
+
+          return b.motionScore - a.motionScore;
+        }
+      )[0];
 
     return NextResponse.json({
       success: true,

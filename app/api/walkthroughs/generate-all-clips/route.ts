@@ -1,10 +1,38 @@
-import RunwayML from "@runwayml/sdk";
 import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
+type SceneInput = {
+  photoNumber?: number;
+  category?: string;
+  roomLabel?: string;
+  storyRole?: string;
+  visibleFeatures?: string[];
+  preservationRules?: string[];
+  transitionIntent?: string;
+  distortionRisk?: "low" | "medium" | "high";
+  blurRisk?: "low" | "medium" | "high";
+  criticalArchitecture?: string[];
+  lockedObjects?: string[];
+};
+
+type GenerateAllRequest = {
+  images?: unknown;
+  scenes?: unknown;
+  propertyDNA?: unknown;
+  upscale?: unknown;
+};
 
 type GeneratedClip = {
   imageUrl: string;
   videoUrl: string;
+  originalVideoUrl: string;
   photoNumber: number;
+  qualityScore: number;
+  sharpnessScore: number;
+  minimumFrameSharpness: number;
+  upscaled: boolean;
 };
 
 type FailedClip = {
@@ -13,91 +41,212 @@ type FailedClip = {
   error: string;
 };
 
+type RetryResponse = {
+  success?: boolean;
+  bestAttempt?: {
+    videoUrl?: string;
+    overallScore?: number;
+    sharpnessScore?: number;
+    minimumFrameSharpness?: number;
+  };
+  message?: string;
+};
+
+type UpscaleResponse = {
+  success?: boolean;
+  upscaledVideoUrl?: string;
+  message?: string;
+};
+
+async function postJson<T>(
+  url: string,
+  body: unknown
+): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  const data = (await response.json()) as T;
+
+  if (!response.ok) {
+    throw new Error(
+      (data as { message?: string }).message ||
+        `Request failed with status ${response.status}.`
+    );
+  }
+
+  return data;
+}
+
+function validImages(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.filter(
+    (item): item is string =>
+      typeof item === "string" &&
+      /^https?:\/\//i.test(item)
+  );
+}
+
+function validScenes(value: unknown): SceneInput[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.filter(
+    (item): item is SceneInput =>
+      typeof item === "object" &&
+      item !== null
+  );
+}
+
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const images = body.images;
+    const body =
+      (await request.json()) as GenerateAllRequest;
 
-    if (!Array.isArray(images) || images.length === 0) {
+    const images = validImages(body.images);
+    const scenes = validScenes(body.scenes);
+
+    if (images.length === 0) {
       return NextResponse.json(
         {
           success: false,
-          message: "No property images were received.",
+          message:
+            "No selected property images were received.",
         },
         { status: 400 }
       );
     }
 
-    const apiKey = process.env.RUNWAYML_API_SECRET?.trim();
+    const origin =
+      new URL(request.url).origin;
 
-    if (!apiKey || !apiKey.startsWith("key_")) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Runway API key is missing or invalid.",
-        },
-        { status: 500 }
-      );
-    }
+    const retryUrl =
+      `${origin}/api/walkthroughs/retry-manager`;
 
-    const runway = new RunwayML({
-      apiKey,
-    });
+    const upscaleUrl =
+      `${origin}/api/upscale-video`;
 
-    // Only generate the first 3 for testing
-    const selectedImages = images.slice(0, 3);
+    /*
+     * IMPORTANT:
+     * There is intentionally no slice(0, 3) and no fixed scene count here.
+     * This route processes exactly the images the Director/UI sends it.
+     */
+    const selectedImages = images;
 
-    console.log("Selected images:", selectedImages.length);
+    const generatedClips:
+      GeneratedClip[] = [];
 
-    const generatedClips: GeneratedClip[] = [];
-    const failedClips: FailedClip[] = [];
+    const failedClips:
+      FailedClip[] = [];
 
-    for (let index = 0; index < selectedImages.length; index++) {
-      const imageUrl = selectedImages[index];
+    const shouldUpscale =
+      body.upscale === true;
 
-      console.log(
-        `Starting clip ${index + 1} of ${selectedImages.length}`
-      );
+    for (
+      let index = 0;
+      index < selectedImages.length;
+      index += 1
+    ) {
+      const imageUrl =
+        selectedImages[index];
+
+      const scene =
+        scenes[index] ?? {};
+
+      const photoNumber =
+        typeof scene.photoNumber === "number"
+          ? scene.photoNumber
+          : index + 1;
 
       try {
-        const task = await runway.imageToVideo
-          .create({
-            model: "gen4.5",
-            promptImage: imageUrl,
-            promptText:
-              "Slow, smooth cinematic real-estate camera movement. Preserve the exact architecture. No added objects. No removed objects.",
-            ratio: "1280:720",
-            duration: 5,
-          })
-          .waitForTaskOutput();
+        const retry =
+          await postJson<RetryResponse>(
+            retryUrl,
+            {
+              imageUrl,
+              category:
+                scene.category ?? "other",
+              scene,
+              propertyDNA:
+                body.propertyDNA ?? {},
+              maxAttempts: 3,
+              passingScore: 90,
+            }
+          );
 
-        const videoUrl = task.output?.[0];
+        const originalVideoUrl =
+          retry.bestAttempt?.videoUrl;
 
-        if (!videoUrl) {
-          failedClips.push({
-            imageUrl,
-            photoNumber: index + 1,
-            error: "No video returned.",
-          });
+        if (
+          !retry.success ||
+          typeof originalVideoUrl !== "string" ||
+          !originalVideoUrl
+        ) {
+          throw new Error(
+            retry.message ||
+              "Retry manager returned no usable clip."
+          );
+        }
 
-          continue;
+        let finalVideoUrl =
+          originalVideoUrl;
+
+        let upscaled = false;
+
+        /*
+         * Upscaling is opt-in here.
+         * For a rough draft, generate/quality-check first.
+         * Upscale accepted clips later so a long listing does not
+         * spend the entire request waiting on upscale tasks.
+         */
+        if (shouldUpscale) {
+          const upscale =
+            await postJson<UpscaleResponse>(
+              upscaleUrl,
+              {
+                videoUrl:
+                  originalVideoUrl,
+                resolution: "2k",
+              }
+            );
+
+          if (
+            upscale.success &&
+            typeof upscale.upscaledVideoUrl ===
+              "string" &&
+            upscale.upscaledVideoUrl
+          ) {
+            finalVideoUrl =
+              upscale.upscaledVideoUrl;
+            upscaled = true;
+          }
         }
 
         generatedClips.push({
           imageUrl,
-          videoUrl,
-          photoNumber: index + 1,
+          originalVideoUrl,
+          videoUrl: finalVideoUrl,
+          photoNumber,
+          qualityScore:
+            retry.bestAttempt
+              ?.overallScore ?? 0,
+          sharpnessScore:
+            retry.bestAttempt
+              ?.sharpnessScore ?? 0,
+          minimumFrameSharpness:
+            retry.bestAttempt
+              ?.minimumFrameSharpness ?? 0,
+          upscaled,
         });
-
-        console.log(
-          `Finished clip ${index + 1} of ${selectedImages.length}`
-        );
       } catch (error) {
-        console.error(error);
-
         failedClips.push({
           imageUrl,
-          photoNumber: index + 1,
+          photoNumber,
           error:
             error instanceof Error
               ? error.message
@@ -106,19 +255,28 @@ export async function POST(request: Request) {
       }
     }
 
-    console.log("Generated clips:", generatedClips.length);
-
     return NextResponse.json({
-      success: true,
+      success:
+        generatedClips.length > 0,
       clips: generatedClips,
       failures: failedClips,
-      completedCount: generatedClips.length,
-      failedCount: failedClips.length,
-      requestedCount: selectedImages.length,
-      message: `Generated ${generatedClips.length} of ${selectedImages.length} clips.`,
+      completedCount:
+        generatedClips.length,
+      failedCount:
+        failedClips.length,
+      requestedCount:
+        selectedImages.length,
+      qualityControlled: true,
+      upscaleRequested:
+        shouldUpscale,
+      message:
+        `Generated ${generatedClips.length} of ${selectedImages.length} selected clips.`,
     });
   } catch (error) {
-    console.error(error);
+    console.error(
+      "Generate-all-clips error:",
+      error
+    );
 
     return NextResponse.json(
       {
