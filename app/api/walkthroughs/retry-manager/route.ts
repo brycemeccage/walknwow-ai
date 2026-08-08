@@ -76,6 +76,10 @@ type AttemptResult = {
   overallScore: number;
   sharpnessScore: number;
   motionScore: number;
+  architectureChanged: boolean;
+  geometryWarpDetected: boolean;
+  furnitureOrFixtureChanged: boolean;
+  hallucinationFailure: boolean;
   pass: boolean;
   problems: string[];
   strengths: string[];
@@ -454,12 +458,25 @@ export async function POST(
             100
           );
 
-        const pass =
-          analysis.pass === true &&
-          score >= passingScore &&
-          sharpnessScore >= 90 &&
-          motionScore >= 80 &&
-          analysis.openingBlurDetected !== true;
+        const architectureChanged =
+      analysis.architectureChanged === true;
+
+    const geometryWarpDetected =
+      analysis.geometryWarpDetected === true;
+
+    const furnitureOrFixtureChanged =
+      analysis.furnitureOrFixtureChanged === true;
+
+    const hallucinationFailure =
+      architectureChanged ||
+      geometryWarpDetected ||
+      furnitureOrFixtureChanged;
+
+    const pass =
+      analysis.pass === true &&
+      score >= passingScore &&
+      !hallucinationFailure &&
+      analysis.openingBlurDetected !== true;
 
         const result:
           AttemptResult = {
@@ -474,9 +491,13 @@ export async function POST(
               generation.data.taskId
             ),
           overallScore: score,
-          sharpnessScore,
-          motionScore,
-          pass,
+      sharpnessScore,
+      motionScore,
+      architectureChanged,
+      geometryWarpDetected,
+      furnitureOrFixtureChanged,
+      hallucinationFailure,
+      pass,
           problems:
             stringList(
               analysis.problems,
@@ -529,6 +550,10 @@ export async function POST(
           overallScore: 0,
           sharpnessScore: 0,
           motionScore: 0,
+          architectureChanged: false,
+          geometryWarpDetected: false,
+          furnitureOrFixtureChanged: false,
+          hallucinationFailure: true,
           pass: false,
           problems: [
             error instanceof Error
@@ -581,30 +606,39 @@ export async function POST(
     }
 
     const bestAttempt =
-      [...successfulAttempts].sort(
-        (a, b) => {
-          const sharpnessDifference =
-            b.sharpnessScore -
-            a.sharpnessScore;
+  [...successfulAttempts].sort(
+    (a, b) => {
+      if (
+        a.hallucinationFailure !==
+        b.hallucinationFailure
+      ) {
+        return a.hallucinationFailure
+          ? 1
+          : -1;
+      }
 
-          if (sharpnessDifference !== 0) {
-            return sharpnessDifference;
-          }
+      const overallDifference =
+        b.overallScore -
+        a.overallScore;
 
-          const overallDifference =
-            b.overallScore -
-            a.overallScore;
+      if (overallDifference !== 0) {
+        return overallDifference;
+      }
 
-          if (overallDifference !== 0) {
-            return overallDifference;
-          }
+      const sharpnessDifference =
+        b.sharpnessScore -
+        a.sharpnessScore;
 
-          return (
-            b.motionScore -
-            a.motionScore
-          );
-        }
-      )[0];
+      if (sharpnessDifference !== 0) {
+        return sharpnessDifference;
+      }
+
+      return (
+        b.motionScore -
+        a.motionScore
+      );
+    }
+  )[0];
 
     return NextResponse.json({
       success: true,
