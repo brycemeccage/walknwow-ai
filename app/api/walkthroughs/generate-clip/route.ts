@@ -15,7 +15,6 @@ import {
   mergeSceneLifeIntoPrompt,
   summarizeSceneLife,
 } from "@/lib/director/scene-life";
-
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
@@ -361,19 +360,19 @@ export async function POST(
       });
 
     const baseScenePrompt =
-  mergeSceneLifeIntoPrompt(
-    propertyPrompt,
-    sceneLifePlan,
-    950
-  );
+      mergeSceneLifeIntoPrompt(
+        propertyPrompt,
+        sceneLifePlan,
+        950
+      );
 
-const fidelityRules =
-  "Use the source image as strict ground truth. Preserve every visible object, wall, window, door, fixture, furnishing, material, reflection, exterior view, tree, plant and landscape exactly; do not add, remove, move, reshape, replace or invent anything. Keep perspective and geometry stable with only restrained camera motion. Any visible ceiling fan may rotate steadily. Any visible fireplace flame stays inside the firebox. No smoke, haze, sparks or invented environmental effects.";
+    const fidelityRules =
+      "Use the source image as strict ground truth. Preserve every visible object, wall, window, door, fixture, furnishing, material, reflection, exterior view, tree, plant and landscape exactly; do not add, remove, move, reshape, replace or invent anything. Keep perspective and geometry stable with only restrained camera motion. Any visible ceiling fan may rotate steadily. Any visible fireplace flame stays inside the firebox. No smoke, haze, sparks or invented environmental effects.";
 
-const promptText =
-  `${baseScenePrompt.slice(0, 500)} ${fidelityRules}`.slice(0, 995);
+    const promptText =
+      `${baseScenePrompt.slice(0, 500)} ${fidelityRules}`.slice(0, 995);
 
-const propertyLockSummary =
+    const propertyLockSummary =
       summarizePropertyLock(
         propertyLock
       );
@@ -427,10 +426,11 @@ const propertyLockSummary =
       category,
       productionPreset: {
         key: "preset_a",
-        label: "Locked 2s",
+        label: "Fidelity 5s",
         durationSeconds: 5,
-        cameraBehavior: "locked",
-        motionBehavior: "almost_static",
+        cameraBehavior: "restrained",
+        motionBehavior:
+          "source_fidelity_first",
       },
       propertyLock: {
         ...propertyLockSummary,
