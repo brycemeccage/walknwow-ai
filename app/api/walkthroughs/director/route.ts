@@ -1084,12 +1084,18 @@ You receive a text catalog describing every listing photo. No image analysis is 
 Build a complete, efficient, professional real-estate walkthrough.
 
 SELECTION:
-- keep every unique major room, bedroom, bathroom, amenity, outdoor area, view, and useful transition
-- keep useful alternate angles only when they reveal layout or a meaningful feature
-- skip true duplicates, materially weaker redundant angles, unusable images, and details with no story value
-- do not use a fixed scene count
-- do not include everything automatically
-- prioritize enough coverage without wasting generation time
+- target 12 to 16 scenes for a normal listing
+- never exceed 16 scenes unless the property is unusually large and has genuinely distinct major spaces that would otherwise be omitted
+- select only the strongest, most useful photo for each room or area by default
+- include a second angle only when it clearly reveals layout, scale, or a major feature not visible in the stronger angle
+- aggressively reject duplicate and near-duplicate photos
+- if two photos show essentially the same room, furniture arrangement, exterior view, or camera angle, keep only the stronger one
+- do not select extra photos just to reach a target count
+- skip decorative close-ups, repeated exterior angles, repeated kitchen angles, repeated bedroom angles, weak hallway shots, redundant bathroom angles, and photos with little storytelling value
+- cover every important major space, but combine redundant coverage and do not include every minor room or alternate angle
+- every selected photo must contribute new visual or spatial information
+- prioritize unique coverage over quantity
+- prefer a shorter, stronger walkthrough over a long repetitive one
 
 ORDER:
 1. strongest exterior or aerial opener
@@ -1229,9 +1235,23 @@ function fallbackStory(
     );
 
   const usable =
-    selected.length > 0
+    (selected.length > 0
       ? selected
-      : photos;
+      : photos)
+      .filter(
+        (photo) =>
+          photo.duplicateOf === 0
+      )
+      .sort(
+        (a, b) =>
+          (b.storytellingScore +
+            b.qualityScore +
+            b.animationSuitabilityScore) -
+          (a.storytellingScore +
+            a.qualityScore +
+            a.animationSuitabilityScore)
+      )
+      .slice(0, 16);
 
   return {
     selectedPhotoNumbers:
@@ -1326,6 +1346,10 @@ function combineOutput(
       ) &&
       photo.duplicateOf === 0
     ) {
+      if (selected.length >= 16) {
+        break;
+      }
+
       selected.push(
         photoNumber
       );
