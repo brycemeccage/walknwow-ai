@@ -735,70 +735,112 @@ export async function POST(
       Math.max(0.1, duration - 0.2)
     );
 
-    const middleTime = Math.min(
-      Math.max(0.2, duration * 0.5),
-      Math.max(0.2, duration - 0.15)
-    );
+    const quarterTime = Math.min(
+  Math.max(0.15, duration * 0.25),
+  Math.max(0.15, duration - 0.18)
+);
 
-    const endingTime = Math.min(
-      Math.max(0.25, duration * 0.9),
-      Math.max(0.25, duration - 0.08)
-    );
+const middleTime = Math.min(
+  Math.max(0.2, duration * 0.5),
+  Math.max(0.2, duration - 0.15)
+);
 
-    const openingPath = path.join(
-      workDir,
-      "opening.jpg"
-    );
+const threeQuarterTime = Math.min(
+  Math.max(0.22, duration * 0.75),
+  Math.max(0.22, duration - 0.12)
+);
 
-    const middlePath = path.join(
-      workDir,
-      "middle.jpg"
-    );
+const endingTime = Math.min(
+  Math.max(0.25, duration * 0.9),
+  Math.max(0.25, duration - 0.08)
+);
 
-    const endingPath = path.join(
-      workDir,
-      "ending.jpg"
-    );
+const openingPath = path.join(
+  workDir,
+  "opening.jpg"
+);
 
-    await extractFrame(
-      videoPath,
-      openingPath,
-      openingTime
-    );
+const quarterPath = path.join(
+  workDir,
+  "quarter.jpg"
+);
 
-    await extractFrame(
-      videoPath,
-      middlePath,
-      middleTime
-    );
+const middlePath = path.join(
+  workDir,
+  "middle.jpg"
+);
 
-    await extractFrame(
-      videoPath,
-      endingPath,
-      endingTime
-    );
+const threeQuarterPath = path.join(
+  workDir,
+  "three-quarter.jpg"
+);
 
-    const sourceDataUrl =
-      await imageToDataUrl(
-        sourceImagePath
-      );
+const endingPath = path.join(
+  workDir,
+  "ending.jpg"
+);
 
-    const openingDataUrl =
-      await imageToDataUrl(
-        openingPath
-      );
+await extractFrame(
+  videoPath,
+  openingPath,
+  openingTime
+);
 
-    const middleDataUrl =
-      await imageToDataUrl(
-        middlePath
-      );
+await extractFrame(
+  videoPath,
+  quarterPath,
+  quarterTime
+);
 
-    const endingDataUrl =
-      await imageToDataUrl(
-        endingPath
-      );
+await extractFrame(
+  videoPath,
+  middlePath,
+  middleTime
+);
 
-    const distortionRisk = risk(
+await extractFrame(
+  videoPath,
+  threeQuarterPath,
+  threeQuarterTime
+);
+
+await extractFrame(
+  videoPath,
+  endingPath,
+  endingTime
+);
+
+const sourceDataUrl =
+  await imageToDataUrl(
+    sourceImagePath
+  );
+
+const openingDataUrl =
+  await imageToDataUrl(
+    openingPath
+  );
+
+const quarterDataUrl =
+  await imageToDataUrl(
+    quarterPath
+  );
+
+const middleDataUrl =
+  await imageToDataUrl(
+    middlePath
+  );
+
+const threeQuarterDataUrl =
+  await imageToDataUrl(
+    threeQuarterPath
+  );
+
+const endingDataUrl =
+  await imageToDataUrl(
+    endingPath
+  );
+
+const distortionRisk = risk(
       body.distortionRisk,
       "medium"
     );
