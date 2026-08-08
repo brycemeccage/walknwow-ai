@@ -1084,8 +1084,8 @@ You receive a text catalog describing every listing photo. No image analysis is 
 Build a complete, efficient, professional real-estate walkthrough.
 
 SELECTION:
-- target 12 to 16 scenes for a normal listing
-- never exceed 16 scenes unless the property is unusually large and has genuinely distinct major spaces that would otherwise be omitted
+- do not target a specific scene count; select only genuinely valuable unique scenes
+- scene count should be determined by property coverage and quality, not by filling a quota
 - select only the strongest, most useful photo for each room or area by default
 - include a second angle only when it clearly reveals layout, scale, or a major feature not visible in the stronger angle
 - aggressively reject duplicate and near-duplicate photos
@@ -1251,7 +1251,7 @@ function fallbackStory(
             a.qualityScore +
             a.animationSuitabilityScore)
       )
-      .slice(0, 16);
+      ;
 
   return {
     selectedPhotoNumbers:
@@ -1327,39 +1327,173 @@ function combineOutput(
     );
 
   const selected: number[] = [];
-  const selectedSet =
-    new Set<number>();
+const selectedSet = new Set<number>();
+const usedRoomKeys = new Set<string>();
 
-  for (
-    const photoNumber of
-      storyResult.selectedPhotoNumbers
+const storyPhotoSet = new Set(
+  storyResult.selectedPhotoNumbers
+);
+
+function normalizedRoomKey(
+  photo: PhotoAnalysis
+): string {
+  const raw =
+    (photo.roomLabel || photo.category || "other")
+      .toLowerCase()
+      .trim();
+
+  return raw
+    .replace(
+      /\b(angle|alternate|alt|view|shot|photo)\s*#?\d*\b/g,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function importanceBonus(
+  photo: PhotoAnalysis
+): number {
+  const value =
+    `${photo.category} ${photo.roomLabel}`
+      .toLowerCase();
+
+  if (
+    /front exterior|exterior front|hero|aerial/.test(
+      value
+    )
   ) {
-    const photo =
-      photoMap.get(
-        photoNumber
-      );
-
-    if (
-      photo &&
-      !selectedSet.has(
-        photoNumber
-      ) &&
-      photo.duplicateOf === 0
-    ) {
-      if (selected.length >= 16) {
-        break;
-      }
-
-      selected.push(
-        photoNumber
-      );
-      selectedSet.add(
-        photoNumber
-      );
-    }
+    return 28;
   }
 
-  const storyMap =
+  if (
+    /living|family room|great room/.test(
+      value
+    )
+  ) {
+    return 27;
+  }
+
+  if (/kitchen/.test(value)) {
+    return 27;
+  }
+
+  if (
+    /primary bedroom|master bedroom|primary suite|master suite/.test(
+      value
+    )
+  ) {
+    return 25;
+  }
+
+  if (
+    /primary bath|master bath/.test(
+      value
+    )
+  ) {
+    return 23;
+  }
+
+  if (/dining/.test(value)) {
+    return 20;
+  }
+
+  if (
+    /pool|backyard|patio|deck|view|waterfront|dock/.test(
+      value
+    )
+  ) {
+    return 22;
+  }
+
+  if (
+    /theater|gym|game room|office|guest house|garage|amenity/.test(
+      value
+    )
+  ) {
+    return 18;
+  }
+
+  if (/bedroom/.test(value)) {
+    return 16;
+  }
+
+  if (/bathroom|bath/.test(value)) {
+    return 14;
+  }
+
+  if (
+    /hallway|corridor|closet|laundry|detail/.test(
+      value
+    )
+  ) {
+    return 2;
+  }
+
+  return 10;
+}
+
+function riskAdjustment(
+  riskLevel: RiskLevel
+): number {
+  if (riskLevel === "low") {
+    return 8;
+  }
+
+  if (riskLevel === "medium") {
+    return 1;
+  }
+
+  return -12;
+}
+
+function selectionScore(
+  photo: PhotoAnalysis
+): number {
+  return (
+    photo.qualityScore * 0.42 +
+    photo.storytellingScore * 0.24 +
+    photo.animationSuitabilityScore * 0.22 +
+    importanceBonus(photo) +
+    riskAdjustment(photo.distortionRisk) +
+    riskAdjustment(photo.blurRisk) +
+    (photo.includeRecommendation ? 6 : -6) +
+    (storyPhotoSet.has(photo.photoNumber)
+      ? 5
+      : 0)
+  );
+}
+
+const rankedPhotos = [...photos]
+  .filter(
+    (photo) =>
+      photo.duplicateOf === 0 &&
+      photo.qualityScore >= 55 &&
+      photo.animationSuitabilityScore >= 45
+  )
+  .sort(
+    (a, b) =>
+      selectionScore(b) -
+      selectionScore(a)
+  );
+
+for (const photo of rankedPhotos) {
+  const roomKey =
+    normalizedRoomKey(photo);
+
+  if (
+    selectedSet.has(photo.photoNumber) ||
+    usedRoomKeys.has(roomKey)
+  ) {
+    continue;
+  }
+
+  selected.push(photo.photoNumber);
+  selectedSet.add(photo.photoNumber);
+  usedRoomKeys.add(roomKey);
+}
+
+const storyMap =
     new Map(
       storyResult.scenes.map(
         (scene) => [
