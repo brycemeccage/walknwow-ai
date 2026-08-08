@@ -17,6 +17,10 @@ type MergeClipsRequest = {
 const CLIP_DURATION = 4.0;
 const FADE_DURATION = 0.35;
 
+const MUSIC_VOLUME = 0.18;
+const MUSIC_FADE_IN = 1.2;
+const MUSIC_FADE_OUT = 1.5;
+
 function runFFmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpegPath =
@@ -194,6 +198,49 @@ async function concatClips(
   ]);
 }
 
+async function addMusic(
+  videoPath: string,
+  musicPath: string,
+  outputPath: string,
+  totalDuration: number
+): Promise<void> {
+  const fadeOutStart =
+    Math.max(0, totalDuration - MUSIC_FADE_OUT);
+
+  const audioFilter = [
+    `volume=${MUSIC_VOLUME}`,
+    `afade=t=in:st=0:d=${MUSIC_FADE_IN}`,
+    `afade=t=out:st=${fadeOutStart.toFixed(2)}:d=${MUSIC_FADE_OUT}`,
+  ].join(",");
+
+  await runFFmpeg([
+    "-y",
+    "-i",
+    videoPath,
+    "-stream_loop",
+    "-1",
+    "-i",
+    musicPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-af",
+    audioFilter,
+    "-t",
+    totalDuration.toFixed(2),
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ]);
+}
+
 export async function POST(request: Request) {
   const jobId = randomUUID();
 
@@ -205,9 +252,21 @@ export async function POST(request: Request) {
 
   const filename = `walkthrough-${jobId}.mp4`;
 
+  const silentOutputPath = path.join(
+    tempDirectory,
+    `silent-${filename}`
+  );
+
   const outputPath = path.join(
     tempDirectory,
     filename
+  );
+
+  const musicPath = path.join(
+    process.cwd(),
+    "public",
+    "music",
+    "walknwow-theme.mp3"
   );
 
   try {
@@ -272,8 +331,18 @@ export async function POST(request: Request) {
 
     await concatClips(
       normalizedPaths,
-      outputPath,
+      silentOutputPath,
       tempDirectory
+    );
+
+    const totalDuration =
+      normalizedPaths.length * CLIP_DURATION;
+
+    await addMusic(
+      silentOutputPath,
+      musicPath,
+      outputPath,
+      totalDuration
     );
 
     const finalVideo =
