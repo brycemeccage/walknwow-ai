@@ -181,25 +181,30 @@ function extractImages(
   }
 
   /*
-   * Then fill from known gallery-shaped photo arrays only.
-   * DO NOT recursively crawl every URL in the property record:
-   * that can collect thousands of thumbnails, maps, avatars,
-   * nearby listings, and duplicate image variants.
+   * IMPORTANT:
+   * responsivePhotos is the canonical Zillow gallery when present.
+   * Do NOT merge photos/originalPhotos/images into it, because Apify
+   * often returns the same listing gallery again in alternate URL/
+   * resolution shapes. That was doubling an 86-photo listing to 172.
+   *
+   * Only use the alternate arrays when responsivePhotos is empty.
    */
-  addPhotoArray(
-    result.photos,
-    discovered
-  );
+  if (discovered.size === 0) {
+    addPhotoArray(
+      result.photos,
+      discovered
+    );
 
-  addPhotoArray(
-    result.originalPhotos,
-    discovered
-  );
+    addPhotoArray(
+      result.originalPhotos,
+      discovered
+    );
 
-  addPhotoArray(
-    result.images,
-    discovered
-  );
+    addPhotoArray(
+      result.images,
+      discovered
+    );
+  }
 
   if (
     discovered.size === 0 &&
