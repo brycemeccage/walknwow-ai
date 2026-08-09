@@ -1547,23 +1547,43 @@ function combineOutput(
   const selected: number[] = [];
   const selectedSet =
     new Set<number>();
-  const usedRooms =
-    new Set<string>();
+  const usedRoomCounts =
+    new Map<string, number>();
 
   /*
-   * 27 source photos -> maximum around 16.
-   * This is a ceiling, not a quota.
+   * Variable-size safety ceiling, not a target.
+   * 27 photos -> about 16 max.
+   * 86 photos -> about 22 max.
+   * Large listings can earn more coverage without selecting everything.
    */
   const maxScenes =
     Math.min(
-      18,
+      28,
       Math.max(
-        10,
+        12,
         Math.round(
-          photos.length * 0.60
+          8 + Math.sqrt(photos.length) * 1.55
         )
       )
     );
+
+  function roomAllowance(
+    key: string
+  ): number {
+    if (
+      /aerial|view|rear-exterior|patio-deck|pool/.test(key)
+    ) {
+      return 3;
+    }
+
+    if (
+      /main-living|kitchen|front-exterior/.test(key)
+    ) {
+      return 2;
+    }
+
+    return 1;
+  }
 
   for (const photo of rankedPhotos) {
     if (
@@ -1579,11 +1599,14 @@ function combineOutput(
     const key =
       roomKey(photo);
 
+    const usedCount =
+      usedRoomCounts.get(key) ?? 0;
+
     if (
       selectedSet.has(
         photo.photoNumber
       ) ||
-      usedRooms.has(key)
+      usedCount >= roomAllowance(key)
     ) {
       continue;
     }
@@ -1617,16 +1640,30 @@ function combineOutput(
       photo.photoNumber
     );
 
-    usedRooms.add(key);
+    usedRoomCounts.set(
+      key,
+      usedCount + 1
+    );
   }
 
   /*
    * Never return zero merely because the AI story step was strict.
    * Backfill only strong, unique rooms. Never select all photos.
    */
+  const minimumCoverage =
+    Math.min(
+      maxScenes,
+      Math.max(
+        10,
+        Math.round(
+          Math.sqrt(photos.length) * 1.7
+        )
+      )
+    );
+
   if (
     selected.length <
-    Math.min(10, photos.length)
+    minimumCoverage
   ) {
     const backfill =
       [...photos]
@@ -1643,10 +1680,7 @@ function combineOutput(
     for (const photo of backfill) {
       if (
         selected.length >=
-        Math.min(
-          14,
-          maxScenes
-        )
+        minimumCoverage
       ) {
         break;
       }
@@ -1654,11 +1688,14 @@ function combineOutput(
       const key =
         roomKey(photo);
 
+      const usedCount =
+        usedRoomCounts.get(key) ?? 0;
+
       if (
         selectedSet.has(
           photo.photoNumber
         ) ||
-        usedRooms.has(key)
+        usedCount >= roomAllowance(key)
       ) {
         continue;
       }
@@ -1671,7 +1708,10 @@ function combineOutput(
         photo.photoNumber
       );
 
-      usedRooms.add(key);
+      usedRoomCounts.set(
+        key,
+        usedCount + 1
+      );
     }
   }
 
