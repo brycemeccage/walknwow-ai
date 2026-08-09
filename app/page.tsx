@@ -73,11 +73,35 @@ type DirectorResponse = {
   usedFallback?: boolean;
 };
 
-type GenerateClipResponse = {
+type RetryAttempt = {
+  attemptNumber?: number;
+  status?: "passed" | "failed" | "error";
+  videoUrl?: string;
+  taskId?: string;
+  overallScore?: number;
+  pass?: boolean;
+  problems?: string[];
+  strengths?: string[];
+  retryPrompt?: string;
+  runtimeSeconds?: number;
+};
+
+type RetryManagerResponse = {
+  success?: boolean;
+  passed?: boolean;
+  bestAttempt?: RetryAttempt;
+  attempts?: RetryAttempt[];
+  totalAttempts?: number;
+  totalRuntimeSeconds?: number;
+  message?: string;
+};
+
+type UpscaleResponse = {
   success?: boolean;
   message?: string;
   taskId?: string;
-  videoUrl?: string;
+  upscaledVideoUrl?: string;
+  resolution?: string;
 };
 
 type QualityAnalysis = {
@@ -109,7 +133,10 @@ type QualityResponse = {
 type GeneratedClip = {
   photoNumber: number;
   imageUrl: string;
+  originalVideoUrl: string;
   videoUrl: string;
+  upscaled: boolean;
+  upscaleResolution?: string;
   quality?: QualityAnalysis;
   attempts: number;
 };
@@ -126,10 +153,11 @@ type MergeResponse = {
   clipCount?: number;
   filename?: string;
   videoUrl?: string;
+  music?: { profile?: string; track?: string };
 };
 
-const CONCURRENCY = 6;
-const MAX_ATTEMPTS = 2;
+const CONCURRENCY = 5;
+const ENABLE_2K_UPSCALE = true;
 
 function needsQualityInspection(scene: DirectorScene): boolean {
   return (
@@ -184,7 +212,8 @@ function buildFallbackScene(photoNumber: number): DirectorScene {
     distortionRisk: "medium",
     blurRisk: "medium",
     visibleFeatures: [],
-    cameraMove: "Use a slow stabilized forward gimbal glide with minimal movement.",
+    cameraMove:
+  "Keep the camera perfectly level. Use only one tiny left-to-right or right-to-left slide OR one tiny smooth zoom out. Never move up, down, diagonally, orbit, roll, float, tilt, or crane. The environment—not the camera—must create the feeling of motion.",
     transitionIntent: "End naturally for a clean cut to the next scene.",
     preservationRules: [
       "Preserve every visible architectural line exactly.",
@@ -212,6 +241,8 @@ export default function Home() {
   const [completedCount, setCompletedCount] = useState(0);
   const [walkthroughUrl, setWalkthroughUrl] = useState("");
   const [walkthroughFilename, setWalkthroughFilename] = useState("walkthrough.mp4");
+  const [musicOverride, setMusicOverride] = useState("auto");
+  const [selectedMusicLabel, setSelectedMusicLabel] = useState("");
 
   const isBusy = isExtracting || isDirecting || isGenerating || isMerging;
 
@@ -305,7 +336,11 @@ export default function Home() {
 
       const normalizedScenes = selected.map(
         (photoNumber) =>
-          payload.scenes?.find((scene) => scene.photoNumber === photoNumber) ??
+          payload.scenes?.find(
+            (scene) =>
+              scene.photoNumber === photoNumber &&
+              scene.include === true
+          ) ??
           buildFallbackScene(photoNumber)
       );
 
@@ -388,54 +423,31 @@ export default function Home() {
 
   async function generateClip(
     scene: DirectorScene,
-    imageUrl: string,
-    retryPrompt?: string
-  ): Promise<GenerateClipResponse> {
-    const adjustedScene = retryPrompt
-      ? {
-          ...scene,
-          cameraMove: `${scene.cameraMove ?? ""} ${retryPrompt}`.trim(),
-          distortionRisk: "high" as RiskLevel,
-          blurRisk: "high" as RiskLevel,
-        }
-      : scene;
-
-    return await requestJson<GenerateClipResponse>(
-      "/api/walkthroughs/generate-clip",
+    imageUrl: string
+  ): Promise<RetryManagerResponse> {
+    return await requestJson<RetryManagerResponse>(
+      "/api/walkthroughs/retry-manager",
       {
         imageUrl,
-        category: adjustedScene.category ?? "other",
-        distortionRisk: risk(adjustedScene.distortionRisk, "medium"),
-        blurRisk: risk(adjustedScene.blurRisk, "medium"),
-        scene: adjustedScene,
+        category: scene.category ?? "other",
+        scene,
         propertyDNA: director?.propertyDNA ?? {},
+        maxAttempts: 3,
+        passingScore: 90,
       }
     );
   }
 
-  async function inspectClip(
-    scene: DirectorScene,
-    imageUrl: string,
+  async function upscaleAcceptedClip(
     videoUrl: string
-  ): Promise<QualityAnalysis | undefined> {
-    try {
-      const response = await requestJson<QualityResponse>(
-        "/api/walkthroughs/quality",
-        {
-          sourceImageUrl: imageUrl,
-          videoUrl,
-          category: scene.category ?? "other",
-          distortionRisk: risk(scene.distortionRisk, "medium"),
-          blurRisk: risk(scene.blurRisk, "medium"),
-        }
-      );
-
-      if (!response.success || !response.analysis) return undefined;
-      return response.analysis;
-    } catch (error) {
-      console.error("Quality inspection failed:", error);
-      return undefined;
-    }
+  ): Promise<UpscaleResponse> {
+    return await requestJson<UpscaleResponse>(
+      "/api/walkthroughs/upscale-video",
+      {
+        videoUrl,
+        resolution: "2k",
+      }
+    );
   }
 
   async function generateOneScene(scene: DirectorScene): Promise<void> {
@@ -445,65 +457,111 @@ export default function Home() {
       throw new Error(`Photo ${scene.photoNumber} is missing.`);
     }
 
-    let retryPrompt = "";
-    let lastError = "";
+    const generated = await generateClip(
+      scene,
+      imageUrl
+    );
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const bestAttempt = generated.bestAttempt;
+    const originalVideoUrl =
+      bestAttempt?.videoUrl?.trim() ?? "";
+
+    if (
+      !generated.success ||
+      !originalVideoUrl
+    ) {
+      throw new Error(
+        generated.message ??
+          "Retry Manager returned no usable video."
+      );
+    }
+
+    let finalVideoUrl = originalVideoUrl;
+    let upscaled = false;
+    let upscaleResolution = "";
+
+    if (ENABLE_2K_UPSCALE) {
+      setStatusMessage(
+        `Photo ${scene.photoNumber} selected its best attempt. Upscaling to 2K...`
+      );
+
       try {
-        const generated = await generateClip(scene, imageUrl, retryPrompt);
-
-        if (!generated.success || !generated.videoUrl) {
-          throw new Error(generated.message ?? "Runway returned no video.");
-        }
-
-        const quality = needsQualityInspection(scene)
-          ? await inspectClip(
-              scene,
-              imageUrl,
-              generated.videoUrl
-            )
-          : undefined;
-
-        const shouldRetry =
-          quality &&
-          isMajorQualityFailure(quality) &&
-          attempt < MAX_ATTEMPTS;
-
-        if (shouldRetry) {
-          retryPrompt = quality.retryPrompt;
-          setStatusMessage(
-            `Photo ${scene.photoNumber} had a major quality issue. Regenerating once...`
+        const upscaleResult =
+          await upscaleAcceptedClip(
+            originalVideoUrl
           );
-          continue;
+
+        if (
+          upscaleResult.success &&
+          upscaleResult.upscaledVideoUrl
+        ) {
+          finalVideoUrl =
+            upscaleResult.upscaledVideoUrl;
+          upscaled = true;
+          upscaleResolution =
+            upscaleResult.resolution ?? "2k";
         }
-
-        const clip: GeneratedClip = {
-          photoNumber: scene.photoNumber,
-          imageUrl,
-          videoUrl: generated.videoUrl,
-          quality,
-          attempts: attempt,
-        };
-
-        setGeneratedClips((current) =>
-          [
-            ...current.filter(
-              (existing) => existing.photoNumber !== scene.photoNumber
-            ),
-            clip,
-          ].sort((a, b) => a.photoNumber - b.photoNumber)
+      } catch (upscaleError) {
+        console.error(
+          `Photo ${scene.photoNumber} upscale failed; using the Retry Manager winner:`,
+          upscaleError
         );
-        setCompletedCount((current) => current + 1);
-        return;
-      } catch (error) {
-        lastError =
-          error instanceof Error ? error.message : "Unknown generation error.";
-
-        if (attempt >= MAX_ATTEMPTS) break;
       }
     }
 
-    throw new Error(lastError);
+    const quality: QualityAnalysis | undefined =
+      typeof bestAttempt?.overallScore === "number"
+        ? {
+            pass: bestAttempt.pass === true,
+            overallScore: bestAttempt.overallScore,
+            sharpnessScore: 0,
+            architectureScore: 0,
+            geometryScore: 0,
+            continuityScore: 0,
+            motionScore: 0,
+            flickerScore: 0,
+            openingBlurDetected: false,
+            architectureChanged: false,
+            geometryWarpDetected: false,
+            furnitureOrFixtureChanged: false,
+            lightingFlickerDetected: false,
+            problems: bestAttempt.problems ?? [],
+            strengths: bestAttempt.strengths ?? [],
+            retryPrompt: bestAttempt.retryPrompt ?? "",
+          }
+        : undefined;
+
+    const clip: GeneratedClip = {
+      photoNumber: scene.photoNumber,
+      imageUrl,
+      originalVideoUrl,
+      videoUrl: finalVideoUrl,
+      upscaled,
+      upscaleResolution,
+      quality,
+      attempts:
+        generated.totalAttempts ??
+        generated.attempts?.length ??
+        1,
+    };
+
+    setGeneratedClips((current) =>
+      [
+        ...current.filter(
+          (existing) =>
+            existing.photoNumber !==
+            scene.photoNumber
+        ),
+        clip,
+      ].sort(
+        (a, b) =>
+          a.photoNumber - b.photoNumber
+      )
+    );
+
+    setCompletedCount(
+      (current) => current + 1
+    );
   }
 
   async function generateAll(): Promise<void> {
@@ -515,7 +573,9 @@ export default function Home() {
     setFailedClips([]);
     setCompletedCount(0);
     setWalkthroughUrl("");
-    setStatusMessage(`Fast Mode: generating ${selectedScenes.length} scenes with up to ${CONCURRENCY} running at once...`);
+    setStatusMessage(
+      `Generating ${selectedScenes.length} scenes with up to ${CONCURRENCY} workers, then upscaling accepted clips to 2K...`
+    );
 
     try {
       for (
@@ -550,7 +610,7 @@ export default function Home() {
       }
 
       setStatusMessage(
-        "Fast Mode generation finished. Risky scenes were inspected and major failures were retried once."
+        "Generation finished. Retry Manager selected the best attempt for every successful scene, then upscaled winners to 2K when available."
       );
     } finally {
       setIsGenerating(false);
@@ -567,7 +627,11 @@ export default function Home() {
     try {
       const response = await requestJson<MergeResponse>(
         "/api/walkthroughs/merge-clips",
-        { clips: clipsInStoryOrder.map((clip) => clip.videoUrl) }
+        {
+          clips: clipsInStoryOrder.map((clip) => clip.videoUrl),
+          propertyDNA: director?.propertyDNA ?? {},
+          musicProfile: musicOverride,
+        }
       );
 
       if (!response.success || !response.videoUrl) {
@@ -578,6 +642,11 @@ export default function Home() {
 
       setWalkthroughUrl(response.videoUrl);
       setWalkthroughFilename(response.filename ?? "walkthrough.mp4");
+      setSelectedMusicLabel(
+        response.music?.track
+          ? `${response.music.profile ?? "auto"} · ${response.music.track}`
+          : ""
+      );
       setStatusMessage(
         `Walkthrough ready with ${
           response.clipCount ?? clipsInStoryOrder.length
@@ -603,7 +672,7 @@ export default function Home() {
           </div>
 
           <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100">
-            V2 Fast Mode · 6 workers
+            V2 Retry Mode · 5 workers · 2K winners
           </span>
         </div>
       </nav>
@@ -750,10 +819,27 @@ export default function Home() {
                       </h2>
 
                       <p className="mt-2 text-sm text-white/50">
-                        Clips that failed quality control were retried once before
-                        being accepted.
+                        Retry Manager selects the strongest attempt for every scene. Winners are
+                        upscaled to 2K before the final smooth merge.
                       </p>
                     </div>
+
+                    <select
+                      value={musicOverride}
+                      onChange={(event) => setMusicOverride(event.target.value)}
+                      disabled={isBusy}
+                      className="rounded-xl border border-white/15 bg-black px-4 py-3 text-sm text-white"
+                    >
+                      <option value="auto">Music: Auto</option>
+                      <option value="luxury-cinematic">Luxury cinematic</option>
+                      <option value="modern-minimal">Modern minimal</option>
+                      <option value="warm-elegant">Warm elegant</option>
+                      <option value="coastal-airy">Coastal airy</option>
+                      <option value="rustic-organic">Rustic organic</option>
+                      <option value="urban-contemporary">Urban contemporary</option>
+                      <option value="bright-lifestyle">Bright lifestyle</option>
+                      <option value="dramatic-estate">Dramatic estate</option>
+                    </select>
 
                     <button
                       type="button"
@@ -764,6 +850,12 @@ export default function Home() {
                       {isMerging ? "Merging..." : `Merge ${clipsInStoryOrder.length} clips`}
                     </button>
                   </div>
+
+                  {selectedMusicLabel && (
+                    <p className="mt-4 text-sm text-cyan-200">
+                      Soundtrack: {selectedMusicLabel}
+                    </p>
+                  )}
 
                   {walkthroughUrl && (
                     <div className="mt-6">
@@ -840,6 +932,10 @@ export default function Home() {
                             Quality score: {clip.quality.overallScore}/100
                             <br />
                             Attempts: {clip.attempts}
+                            <br />
+                            {clip.upscaled
+                              ? `Upscale: ${clip.upscaleResolution ?? "2K"} ready`
+                              : "Upscale: original accepted clip"}
                           </div>
                         )}
 
