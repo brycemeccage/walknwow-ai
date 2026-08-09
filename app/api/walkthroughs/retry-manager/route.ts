@@ -291,6 +291,15 @@ async function postJson<T>(
   };
 }
 
+async function wait(
+  milliseconds: number
+): Promise<void> {
+  await new Promise(
+    (resolve) =>
+      setTimeout(resolve, milliseconds)
+  );
+}
+
 export async function POST(
   request: Request
 ) {
@@ -388,6 +397,10 @@ export async function POST(
         ].slice(0, 35),
       };
 
+      let generatedVideoUrl = "";
+      let generatedTaskId = "";
+      let generationMessage = "";
+
       try {
         const generation =
           await postJson<GenerateResponse>(
@@ -402,10 +415,25 @@ export async function POST(
             }
           );
 
+        generatedVideoUrl =
+          text(
+            generation.data.videoUrl
+          );
+
+        generatedTaskId =
+          text(
+            generation.data.taskId
+          );
+
+        generationMessage =
+          text(
+            generation.data.message
+          );
+
         if (
           !generation.ok ||
           !generation.data.success ||
-          !generation.data.videoUrl
+          !generatedVideoUrl
         ) {
           throw new Error(
             generation.data.message ||
@@ -413,185 +441,231 @@ export async function POST(
           );
         }
 
-        const quality =
-          await postJson<QualityResponse>(
-            qualityUrl,
-            {
-              sourceImageUrl:
-                imageUrl,
-              videoUrl:
-                generation.data.videoUrl,
-              category,
-              distortionRisk:
-                attemptScene.distortionRisk,
-              blurRisk:
-                attemptScene.blurRisk,
-              propertyLock:
-                generation.data
-                  .propertyLock,
-            }
-          );
+        try {
+          const quality =
+            await postJson<QualityResponse>(
+              qualityUrl,
+              {
+                sourceImageUrl:
+                  imageUrl,
+                videoUrl:
+                  generatedVideoUrl,
+                category,
+                distortionRisk:
+                  attemptScene.distortionRisk,
+                blurRisk:
+                  attemptScene.blurRisk,
+                propertyLock:
+                  generation.data
+                    .propertyLock,
+              }
+            );
 
-        if (
-          !quality.ok ||
-          !quality.data.success ||
-          !quality.data.analysis
-        ) {
-          throw new Error(
-            quality.data.message ||
-              `Quality inspection failed with status ${quality.status}.`
-          );
-        }
+          if (
+            !quality.ok ||
+            !quality.data.success ||
+            !quality.data.analysis
+          ) {
+            throw new Error(
+              quality.data.message ||
+                `Quality inspection failed with status ${quality.status}.`
+            );
+          }
 
-        const analysis =
-          quality.data.analysis;
+          const analysis =
+            quality.data.analysis;
 
-        const score =
-          number(
-            analysis.overallScore,
-            0,
-            0,
-            100
-          );
-
-        const sharpnessScore =
-          number(
-            analysis.sharpnessScore,
-            0,
-            0,
-            100
-          );
-
-        const motionScore =
-          number(
-            analysis.motionScore,
-            0,
-            0,
-            100
-          );
-
-        const minimumFrameSharpness =
-          Math.min(
+          const score =
             number(
-              analysis.openingSharpness,
-              sharpnessScore,
+              analysis.overallScore,
+              0,
               0,
               100
-            ),
+            );
+
+          const sharpnessScore =
             number(
-              analysis.middleSharpness,
-              sharpnessScore,
+              analysis.sharpnessScore,
+              0,
               0,
               100
-            ),
+            );
+
+          const motionScore =
             number(
-              analysis.endingSharpness,
-              sharpnessScore,
+              analysis.motionScore,
+              0,
               0,
               100
-            )
-          );
+            );
 
-        const architectureChanged =
-          analysis.architectureChanged === true;
+          const minimumFrameSharpness =
+            Math.min(
+              number(
+                analysis.openingSharpness,
+                sharpnessScore,
+                0,
+                100
+              ),
+              number(
+                analysis.middleSharpness,
+                sharpnessScore,
+                0,
+                100
+              ),
+              number(
+                analysis.endingSharpness,
+                sharpnessScore,
+                0,
+                100
+              )
+            );
 
-        const geometryWarpDetected =
-          analysis.geometryWarpDetected === true;
+          const architectureChanged =
+            analysis.architectureChanged === true;
 
-        const furnitureOrFixtureChanged =
-          analysis.furnitureOrFixtureChanged === true;
+          const geometryWarpDetected =
+            analysis.geometryWarpDetected === true;
 
-        const vegetationDriftDetected =
-          analysis.vegetationDriftDetected === true;
+          const furnitureOrFixtureChanged =
+            analysis.furnitureOrFixtureChanged === true;
 
-        const hallucinationFailure =
-          architectureChanged ||
-          geometryWarpDetected ||
-          furnitureOrFixtureChanged ||
-          vegetationDriftDetected;
+          const vegetationDriftDetected =
+            analysis.vegetationDriftDetected === true;
 
-        const referenceQualityScore =
-          minimumFrameSharpness * 0.45 +
-          sharpnessScore * 0.25 +
-          motionScore * 0.20 +
-          score * 0.10;
+          const hallucinationFailure =
+            architectureChanged ||
+            geometryWarpDetected ||
+            furnitureOrFixtureChanged ||
+            vegetationDriftDetected;
 
-        const pass =
-          analysis.pass === true &&
-          score >= passingScore &&
-          sharpnessScore >= 92 &&
-          minimumFrameSharpness >= 90 &&
-          motionScore >= 84 &&
-          referenceQualityScore >= 90 &&
-          !hallucinationFailure &&
-          analysis.openingBlurDetected !== true &&
-          analysis.middleBlurDetected !== true &&
-          analysis.endingBlurDetected !== true;
+          const referenceQualityScore =
+            minimumFrameSharpness * 0.45 +
+            sharpnessScore * 0.25 +
+            motionScore * 0.20 +
+            score * 0.10;
 
-        const result:
-          AttemptResult = {
-          attemptNumber,
-          status: pass
-            ? "passed"
-            : "failed",
-          videoUrl:
-            generation.data.videoUrl,
-          taskId:
-            text(
-              generation.data.taskId
-            ),
-          overallScore: score,
-          sharpnessScore,
-          minimumFrameSharpness,
-          motionScore,
-          architectureChanged,
-          geometryWarpDetected,
-          furnitureOrFixtureChanged,
-          vegetationDriftDetected,
-          hallucinationFailure,
-          pass,
-          problems:
-            stringList(
-              analysis.problems,
-              25
-            ),
-          strengths:
-            stringList(
-              analysis.strengths,
-              20
-            ),
-          retryPrompt:
-            text(
-              analysis.retryPrompt
-            ),
-          runtimeSeconds:
-            Number(
-              (
-                (Date.now() -
-                  attemptStartedAt) /
-                1000
-              ).toFixed(1)
-            ),
-          generationMessage:
-            text(
-              generation.data.message
-            ),
-          qualityMessage:
-            text(
-              quality.data.message
-            ),
-        };
+          const pass =
+            analysis.pass === true &&
+            score >= passingScore &&
+            sharpnessScore >= 92 &&
+            minimumFrameSharpness >= 90 &&
+            motionScore >= 84 &&
+            referenceQualityScore >= 90 &&
+            !hallucinationFailure &&
+            analysis.openingBlurDetected !== true &&
+            analysis.middleBlurDetected !== true &&
+            analysis.endingBlurDetected !== true;
 
-        attempts.push(result);
+          const result:
+            AttemptResult = {
+            attemptNumber,
+            status: pass
+              ? "passed"
+              : "failed",
+            videoUrl:
+              generatedVideoUrl,
+            taskId:
+              generatedTaskId,
+            overallScore: score,
+            sharpnessScore,
+            minimumFrameSharpness,
+            motionScore,
+            architectureChanged,
+            geometryWarpDetected,
+            furnitureOrFixtureChanged,
+            vegetationDriftDetected,
+            hallucinationFailure,
+            pass,
+            problems:
+              stringList(
+                analysis.problems,
+                25
+              ),
+            strengths:
+              stringList(
+                analysis.strengths,
+                20
+              ),
+            retryPrompt:
+              text(
+                analysis.retryPrompt
+              ),
+            runtimeSeconds:
+              Number(
+                (
+                  (Date.now() -
+                    attemptStartedAt) /
+                  1000
+                ).toFixed(1)
+              ),
+            generationMessage,
+            qualityMessage:
+              text(
+                quality.data.message
+              ),
+          };
 
-        previousRetryPrompt =
-          result.retryPrompt;
+          attempts.push(result);
 
-        previousProblems =
-          result.problems;
+          previousRetryPrompt =
+            result.retryPrompt;
 
-        if (pass) {
-          break;
+          previousProblems =
+            result.problems;
+
+          if (pass) {
+            break;
+          }
+        } catch (qualityError) {
+          /*
+           * Important: generation succeeded. Do not throw away a real clip
+           * just because the quality-inspection route had a transient failure.
+           * Keep it as an unverified fallback and continue retrying.
+           */
+          attempts.push({
+            attemptNumber,
+            status: "failed",
+            videoUrl:
+              generatedVideoUrl,
+            taskId:
+              generatedTaskId,
+            overallScore: 1,
+            sharpnessScore: 1,
+            minimumFrameSharpness: 1,
+            motionScore: 1,
+            architectureChanged: false,
+            geometryWarpDetected: false,
+            furnitureOrFixtureChanged: false,
+            vegetationDriftDetected: false,
+            hallucinationFailure: false,
+            pass: false,
+            problems: [
+              qualityError instanceof Error
+                ? `Quality inspection unavailable: ${qualityError.message}`
+                : "Quality inspection unavailable.",
+            ],
+            strengths: [
+              "Generation completed and returned a playable clip.",
+            ],
+            retryPrompt:
+              "Retry with the same property lock and conservative source-boundary motion.",
+            runtimeSeconds:
+              Number(
+                (
+                  (Date.now() -
+                    attemptStartedAt) /
+                  1000
+                ).toFixed(1)
+              ),
+            generationMessage,
+            qualityMessage:
+              "Quality inspection failed; clip retained as an unverified fallback.",
+          });
+
+          previousProblems = [
+            "Quality inspection was unavailable. Keep the next attempt conservative and faithful.",
+          ];
         }
       } catch (error) {
         attempts.push({
@@ -624,9 +698,18 @@ export async function POST(
                 1000
               ).toFixed(1)
             ),
-          generationMessage: "",
+          generationMessage,
           qualityMessage: "",
         });
+      }
+
+      if (
+        attemptNumber <
+        maxAttempts
+      ) {
+        await wait(
+          750 * attemptNumber
+        );
       }
     }
 
@@ -644,7 +727,7 @@ export async function POST(
         {
           success: false,
           message:
-            "All retry attempts failed before producing a usable clip.",
+            "All generation attempts failed before returning any video URL. Check the attempt errors for the upstream generation failure.",
           attempts,
           totalRuntimeSeconds:
             Number(

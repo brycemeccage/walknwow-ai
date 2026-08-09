@@ -1405,6 +1405,18 @@ function combineOutput(
     return value;
   }
 
+  function isNonCinematicListingGraphic(
+    photo: PhotoAnalysis
+  ): boolean {
+    const value =
+      `${photo.category} ${photo.roomLabel} ${photo.reason} ${photo.visibleFeatures.join(" ")}`
+        .toLowerCase();
+
+    return /property line|property boundary|boundary highlighted|map pin|map marker|annotation|annotated|text overlay|graphic overlay|site plan|floor plan|diagram|lot line|parcel line|arrow overlay|label overlay|100% accurate|virtual staging|virtually staged/.test(
+      value
+    );
+  }
+
   function importanceBonus(
     photo: PhotoAnalysis
   ): number {
@@ -1413,7 +1425,15 @@ function combineOutput(
         .toLowerCase();
 
     if (
-      /front exterior|exterior front|hero|aerial/.test(
+      /clean aerial|aerial|drone|lake|waterfront|water view|ocean|river|mountain view/.test(
+        value
+      )
+    ) {
+      return 27;
+    }
+
+    if (
+      /front exterior|exterior front|hero/.test(
         value
       )
     ) {
@@ -1536,7 +1556,8 @@ function combineOutput(
     [...photos]
       .filter(
         (photo) =>
-          photo.duplicateOf === 0
+          photo.duplicateOf === 0 &&
+          !isNonCinematicListingGraphic(photo)
       )
       .sort(
         (a, b) =>
