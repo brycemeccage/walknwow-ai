@@ -216,36 +216,41 @@ function retryRules(
 ): string[] {
   if (attemptNumber === 1) {
     return [
-      "Create a real stabilized walkthrough using a slow forward camera translation and subtle natural parallax.",
-      "Do not fake movement with a flat zoom or panoramic still-image pan.",
-      "Keep every frame fully sharp from beginning through middle to end.",
-      "Preserve every visible object, architectural line, material, tree, branch, landscape element, reflection, and window view.",
-      "Do not add, remove, restage, redesign, or invent anything.",
+      "REFERENCE STANDARD: create a crisp professional real-estate walkthrough, not a moving still image.",
+      "Use a slow stabilized forward camera translation with subtle real parallax between foreground and background.",
+      "Keep the opening, middle, and ending equally sharp and resolved.",
+      "Do not use a flat zoom, Ken Burns effect, panoramic still-image pan, focus pull, depth-of-field blur, or motion smear.",
+      "Preserve the exact source property. Do not add, remove, move, restage, redesign, or invent anything.",
+      "Keep architecture, furniture, decor, small objects, materials, reflections, trees, branches, landscaping, and window views stable.",
     ];
   }
 
   if (attemptNumber === 2) {
     return [
-      "QUALITY RETRY: reduce camera travel while keeping a real forward walkthrough translation with subtle parallax.",
-      "Keep opening, middle, and ending frames equally crisp and resolved.",
-      "No focus pull, motion smear, softening, depth-of-field blur, or texture regeneration.",
-      "Preserve exact architecture, furniture, object count, materials, trees, branches, landscaping, reflections, and views.",
+      "QUALITY RETRY: match the best crisp walkthrough attempts.",
+      "Keep a real slow forward camera translation with subtle parallax; reduce travel distance only enough to maintain perfect sharpness and fidelity.",
+      "Opening, middle, and ending must all remain crisp. No focus settling, softening, motion smear, texture loss, or blurry transition.",
+      "Do not replace walkthrough motion with a static tripod, flat zoom, or panoramic photo movement.",
+      "Preserve exact architecture, geometry, furniture, object count, materials, reflections, trees, branches, landscaping, and exterior views.",
       previousRetryPrompt,
       ...previousProblems.map(
-        (problem) => `Correct this previous failure: ${problem}`
+        (problem) =>
+          `Correct this previous failure without sacrificing sharp walkthrough motion: ${problem}`
       ),
     ].filter(Boolean);
   }
 
   return [
-    "FINAL FIDELITY RETRY: use only a tiny stabilized forward camera translation with real parallax; do not become a completely static still.",
-    "Prioritize sharpness and source fidelity over movement distance.",
-    "Every sampled frame must remain fully sharp.",
-    "Do not add, remove, move, recolor, resize, replace, redesign, morph, shimmer, or invent anything.",
+    "FINAL REFERENCE RETRY: prioritize the same balance as the best successful clips: crisp source fidelity plus a small but unmistakable forward walkthrough translation.",
+    "Use minimal stabilized forward travel with real parallax. Do not become a still image, flat zoom, pan, orbit, or locked tripod.",
+    "Every frame must stay sharp from start through middle to end.",
+    "No focus pull, motion blur, smear, texture regeneration, shimmer, morphing, or exposure shift.",
+    "Do not add, remove, move, recolor, resize, replace, redesign, or invent anything.",
     "Lock architecture, furniture, small objects, textures, trees, branches, foliage silhouettes, landscaping, reflections, and window views to the source.",
     previousRetryPrompt,
     ...previousProblems.map(
-      (problem) => `Eliminate this prior issue: ${problem}`
+      (problem) =>
+        `Eliminate this prior issue while preserving subtle real walkthrough parallax: ${problem}`
     ),
   ].filter(Boolean);
 }
@@ -467,9 +472,24 @@ export async function POST(
 
         const minimumFrameSharpness =
           Math.min(
-            number(analysis.openingSharpness, sharpnessScore, 0, 100),
-            number(analysis.middleSharpness, sharpnessScore, 0, 100),
-            number(analysis.endingSharpness, sharpnessScore, 0, 100)
+            number(
+              analysis.openingSharpness,
+              sharpnessScore,
+              0,
+              100
+            ),
+            number(
+              analysis.middleSharpness,
+              sharpnessScore,
+              0,
+              100
+            ),
+            number(
+              analysis.endingSharpness,
+              sharpnessScore,
+              0,
+              100
+            )
           );
 
         const architectureChanged =
@@ -490,11 +510,20 @@ export async function POST(
           furnitureOrFixtureChanged ||
           vegetationDriftDetected;
 
+        const referenceQualityScore =
+          minimumFrameSharpness * 0.45 +
+          sharpnessScore * 0.25 +
+          motionScore * 0.20 +
+          score * 0.10;
+
         const pass =
           analysis.pass === true &&
           score >= passingScore &&
-          !hallucinationFailure &&
+          sharpnessScore >= 92 &&
           minimumFrameSharpness >= 90 &&
+          motionScore >= 84 &&
+          referenceQualityScore >= 90 &&
+          !hallucinationFailure &&
           analysis.openingBlurDetected !== true &&
           analysis.middleBlurDetected !== true &&
           analysis.endingBlurDetected !== true;
@@ -633,38 +662,51 @@ export async function POST(
     const bestAttempt =
       [...successfulAttempts].sort(
         (a, b) => {
+          if (a.pass !== b.pass) {
+            return a.pass ? -1 : 1;
+          }
+
           if (
             a.hallucinationFailure !==
             b.hallucinationFailure
           ) {
-            return a.hallucinationFailure ? 1 : -1;
+            return a.hallucinationFailure
+              ? 1
+              : -1;
           }
 
-          const minimumSharpnessDifference =
-            b.minimumFrameSharpness -
-            a.minimumFrameSharpness;
+          const aReferenceScore =
+            a.minimumFrameSharpness * 0.45 +
+            a.sharpnessScore * 0.25 +
+            a.motionScore * 0.20 +
+            a.overallScore * 0.10;
 
-          if (minimumSharpnessDifference !== 0) {
-            return minimumSharpnessDifference;
+          const bReferenceScore =
+            b.minimumFrameSharpness * 0.45 +
+            b.sharpnessScore * 0.25 +
+            b.motionScore * 0.20 +
+            b.overallScore * 0.10;
+
+          const referenceDifference =
+            bReferenceScore -
+            aReferenceScore;
+
+          if (referenceDifference !== 0) {
+            return referenceDifference;
           }
 
-          const sharpnessDifference =
-            b.sharpnessScore -
-            a.sharpnessScore;
+          const motionDifference =
+            b.motionScore -
+            a.motionScore;
 
-          if (sharpnessDifference !== 0) {
-            return sharpnessDifference;
+          if (motionDifference !== 0) {
+            return motionDifference;
           }
 
-          const overallDifference =
+          return (
             b.overallScore -
-            a.overallScore;
-
-          if (overallDifference !== 0) {
-            return overallDifference;
-          }
-
-          return b.motionScore - a.motionScore;
+            a.overallScore
+          );
         }
       )[0];
 
