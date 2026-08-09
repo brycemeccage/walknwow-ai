@@ -374,11 +374,11 @@ export async function POST(
 
     const walkthroughRules =
       motionAmount === "micro"
-        ? "Use a tiny stabilized forward camera translation with real subtle parallax only inside geometry already supported by the source image. Keep framing conservative. Do not pan, orbit, zoom, crop-drift, reveal around corners, or expose hidden areas."
-        : "Use a slow stabilized forward camera translation with restrained natural parallax only inside geometry already supported by the source image. Keep framing conservative. Do not pan, orbit, zoom, crop-drift, reveal around corners, or expose hidden areas.";
+        ? "Use a tiny stabilized forward camera translation with real subtle parallax while staying entirely inside the original source photograph's visible field of view. The virtual camera may move through depth already visible in the photograph, but it must never travel past a doorway, opening, wall edge, furniture edge, foreground occluder, or image boundary."
+        : "Use a slow stabilized forward camera translation with restrained natural parallax while staying entirely inside the original source photograph's visible field of view. The virtual camera may move through depth already visible in the photograph, but it must never travel past a doorway, opening, wall edge, furniture edge, foreground occluder, or image boundary.";
 
     const visibilityLock =
-      "SOURCE-VISIBILITY LOCK: the source photograph is the complete visual truth. Motion may reproject visible surfaces but must not expose, complete, extrapolate, or invent anything hidden behind furniture, walls, doors, counters, islands, trees, frame edges, or foreground objects. If motion would require guessing newly visible content, reduce travel distance instead.";
+      "HARD SOURCE-BOUNDARY LOCK: move WITHIN the photograph, never BEYOND the photograph. The first frame defines the maximum known scene. Never reveal new space outside the original frame and never see around, behind, past, or through an occluding edge. A doorway or opening visible in the source may remain visible exactly as shown, but the camera must not advance through it or reveal more of the adjoining space. Frame edges are hard scene boundaries, not hidden world content. If any motion would expose even a small unsupported area, stop forward travel before that boundary and preserve motion only as subtle parallax within already-visible surfaces. Never complete an unseen room, corridor, wall, floor, ceiling, cabinet side, furniture side, landscape area, neighboring structure, or exterior view.";
 
     const objectLock =
       "IDENTITY LOCK: preserve exact object count, placement, shape, size, color, material, texture, fixtures, furniture, cabinetry, windows, doors, reflections, trees, trunks, branches, foliage silhouettes, grass, fences, decks, horizon, and window views. Objects may shift on screen only from true camera parallax. Nothing may independently move, appear, disappear, morph, split, merge, restage, redesign, or regenerate.";
@@ -443,11 +443,11 @@ export async function POST(
       category,
       productionPreset: {
         key: "preset_a",
-        label: "Visibility-Locked Walkthrough 5s",
+        label: "Hard-Boundary Walkthrough 5s",
         durationSeconds: 5,
         cameraBehavior: "stabilized_forward_translation",
         motionBehavior:
-          "visibility_locked_walkthrough_parallax",
+          "hard_boundary_walkthrough_parallax",
       },
       propertyLock: {
         ...propertyLockSummary,
