@@ -153,11 +153,10 @@ type MergeResponse = {
   clipCount?: number;
   filename?: string;
   videoUrl?: string;
-  music?: { profile?: string; track?: string };
 };
 
 const CONCURRENCY = 5;
-const ENABLE_2K_UPSCALE = true;
+const ENABLE_2K_UPSCALE = false;
 
 function needsQualityInspection(scene: DirectorScene): boolean {
   return (
@@ -241,8 +240,6 @@ export default function Home() {
   const [completedCount, setCompletedCount] = useState(0);
   const [walkthroughUrl, setWalkthroughUrl] = useState("");
   const [walkthroughFilename, setWalkthroughFilename] = useState("walkthrough.mp4");
-  const [musicOverride, setMusicOverride] = useState("auto");
-  const [selectedMusicLabel, setSelectedMusicLabel] = useState("");
 
   const isBusy = isExtracting || isDirecting || isGenerating || isMerging;
 
@@ -425,17 +422,57 @@ export default function Home() {
     scene: DirectorScene,
     imageUrl: string
   ): Promise<RetryManagerResponse> {
-    return await requestJson<RetryManagerResponse>(
-      "/api/walkthroughs/retry-manager",
-      {
-        imageUrl,
-        category: scene.category ?? "other",
-        scene,
-        propertyDNA: director?.propertyDNA ?? {},
-        maxAttempts: 3,
-        passingScore: 90,
-      }
-    );
+    const response =
+      await requestJson<{
+        success?: boolean;
+        videoUrl?: string;
+        taskId?: string;
+        message?: string;
+      }>(
+        "/api/walkthroughs/generate-clip",
+        {
+          imageUrl,
+          category:
+            scene.category ??
+            "other",
+          scene,
+          propertyDNA:
+            director?.propertyDNA ??
+            {},
+        }
+      );
+
+    const videoUrl =
+      response.videoUrl?.trim() ??
+      "";
+
+    return {
+      success:
+        response.success === true &&
+        Boolean(videoUrl),
+      passed: true,
+      bestAttempt: {
+        attemptNumber: 1,
+        status: "passed",
+        videoUrl,
+        taskId:
+          response.taskId ?? "",
+        overallScore: 100,
+        pass: true,
+        problems: [],
+        strengths: [
+          "Direct generation test.",
+        ],
+        retryPrompt: "",
+        runtimeSeconds: 0,
+      },
+      attempts: [],
+      totalAttempts: 1,
+      totalRuntimeSeconds: 0,
+      message:
+        response.message ??
+        "Direct clip generated.",
+    };
   }
 
   async function upscaleAcceptedClip(
@@ -610,7 +647,7 @@ export default function Home() {
       }
 
       setStatusMessage(
-        "Generation finished. Retry Manager selected the best attempt for every successful scene, then upscaled winners to 2K when available."
+        "Generation finished. Direct clip mode is active: Retry Manager, quality inspection, and 2K upscale are temporarily bypassed."
       );
     } finally {
       setIsGenerating(false);
@@ -627,11 +664,7 @@ export default function Home() {
     try {
       const response = await requestJson<MergeResponse>(
         "/api/walkthroughs/merge-clips",
-        {
-          clips: clipsInStoryOrder.map((clip) => clip.videoUrl),
-          propertyDNA: director?.propertyDNA ?? {},
-          musicProfile: musicOverride,
-        }
+        { clips: clipsInStoryOrder.map((clip) => clip.videoUrl) }
       );
 
       if (!response.success || !response.videoUrl) {
@@ -642,11 +675,6 @@ export default function Home() {
 
       setWalkthroughUrl(response.videoUrl);
       setWalkthroughFilename(response.filename ?? "walkthrough.mp4");
-      setSelectedMusicLabel(
-        response.music?.track
-          ? `${response.music.profile ?? "auto"} · ${response.music.track}`
-          : ""
-      );
       setStatusMessage(
         `Walkthrough ready with ${
           response.clipCount ?? clipsInStoryOrder.length
@@ -824,23 +852,6 @@ export default function Home() {
                       </p>
                     </div>
 
-                    <select
-                      value={musicOverride}
-                      onChange={(event) => setMusicOverride(event.target.value)}
-                      disabled={isBusy}
-                      className="rounded-xl border border-white/15 bg-black px-4 py-3 text-sm text-white"
-                    >
-                      <option value="auto">Music: Auto</option>
-                      <option value="luxury-cinematic">Luxury cinematic</option>
-                      <option value="modern-minimal">Modern minimal</option>
-                      <option value="warm-elegant">Warm elegant</option>
-                      <option value="coastal-airy">Coastal airy</option>
-                      <option value="rustic-organic">Rustic organic</option>
-                      <option value="urban-contemporary">Urban contemporary</option>
-                      <option value="bright-lifestyle">Bright lifestyle</option>
-                      <option value="dramatic-estate">Dramatic estate</option>
-                    </select>
-
                     <button
                       type="button"
                       onClick={mergeWalkthrough}
@@ -850,12 +861,6 @@ export default function Home() {
                       {isMerging ? "Merging..." : `Merge ${clipsInStoryOrder.length} clips`}
                     </button>
                   </div>
-
-                  {selectedMusicLabel && (
-                    <p className="mt-4 text-sm text-cyan-200">
-                      Soundtrack: {selectedMusicLabel}
-                    </p>
-                  )}
 
                   {walkthroughUrl && (
                     <div className="mt-6">
