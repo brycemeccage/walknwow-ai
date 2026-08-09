@@ -1405,18 +1405,6 @@ function combineOutput(
     return value;
   }
 
-  function isNonCinematicListingGraphic(
-    photo: PhotoAnalysis
-  ): boolean {
-    const value =
-      `${photo.category} ${photo.roomLabel} ${photo.reason} ${photo.visibleFeatures.join(" ")}`
-        .toLowerCase();
-
-    return /property line|property boundary|boundary highlighted|map pin|map marker|annotation|annotated|text overlay|graphic overlay|site plan|floor plan|diagram|lot line|parcel line|arrow overlay|label overlay|100% accurate|virtual staging|virtually staged/.test(
-      value
-    );
-  }
-
   function importanceBonus(
     photo: PhotoAnalysis
   ): number {
@@ -1425,15 +1413,7 @@ function combineOutput(
         .toLowerCase();
 
     if (
-      /clean aerial|aerial|drone|lake|waterfront|water view|ocean|river|mountain view/.test(
-        value
-      )
-    ) {
-      return 27;
-    }
-
-    if (
-      /front exterior|exterior front|hero/.test(
+      /front exterior|exterior front|hero|aerial/.test(
         value
       )
     ) {
@@ -1556,8 +1536,7 @@ function combineOutput(
     [...photos]
       .filter(
         (photo) =>
-          photo.duplicateOf === 0 &&
-          !isNonCinematicListingGraphic(photo)
+          photo.duplicateOf === 0
       )
       .sort(
         (a, b) =>
@@ -1568,42 +1547,66 @@ function combineOutput(
   const selected: number[] = [];
   const selectedSet =
     new Set<number>();
-  const usedRoomCounts =
-    new Map<string, number>();
+  const selectedByFamily =
+    new Map<string, PhotoAnalysis[]>();
 
   /*
-   * Variable-size safety ceiling, not a target.
-   * 27 photos -> about 16 max.
-   * 86 photos -> about 22 max.
-   * Large listings can earn more coverage without selecting everything.
+   * Room-focused selector:
+   * 1-2 photos per important interior room.
+   * Only 1-2 outdoor/exterior photos TOTAL for the whole property.
+   * This is a safety ceiling, not a quota.
    */
   const maxScenes =
     Math.min(
-      28,
+      22,
       Math.max(
-        12,
+        10,
         Math.round(
-          8 + Math.sqrt(photos.length) * 1.55
+          8 + Math.sqrt(photos.length) * 1.35
         )
       )
     );
 
-  function roomAllowance(
+  function isOutdoorFamily(
+    key: string
+  ): boolean {
+    return (
+      /front-exterior|rear-exterior|aerial|pool|patio-deck|backyard|view|waterfront|dock|outdoor|exterior/.test(
+        key
+      )
+    );
+  }
+
+  function familyAllowance(
     key: string
   ): number {
     if (
-      /aerial|view|rear-exterior|patio-deck|pool/.test(key)
-    ) {
-      return 3;
-    }
-
-    if (
-      /main-living|kitchen|front-exterior/.test(key)
+      /main-living|kitchen|primary-bedroom|dining/.test(
+        key
+      )
     ) {
       return 2;
     }
 
+    if (
+      /primary-bath|bedroom|bathroom|office|theater|gym|game room|guest house|garage/.test(
+        key
+      )
+    ) {
+      return 1;
+    }
+
     return 1;
+  }
+
+  function isImportantInterior(
+    key: string
+  ): boolean {
+    return (
+      /main-living|kitchen|primary-bedroom|primary-bath|dining|bedroom|bathroom|office|theater|gym|game room|guest house|garage/.test(
+        key
+      )
+    );
   }
 
   for (const photo of rankedPhotos) {
@@ -1620,14 +1623,50 @@ function combineOutput(
     const key =
       roomKey(photo);
 
-    const usedCount =
-      usedRoomCounts.get(key) ?? 0;
+    const existing =
+      selectedByFamily.get(key) ?? [];
+
+    const outdoorSelectedCount =
+      Array.from(
+        selectedByFamily.entries()
+      )
+        .filter(
+          ([family]) =>
+            isOutdoorFamily(family)
+        )
+        .reduce(
+          (count, [, items]) =>
+            count + items.length,
+          0
+        );
 
     if (
       selectedSet.has(
         photo.photoNumber
-      ) ||
-      usedCount >= roomAllowance(key)
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      isOutdoorFamily(key) &&
+      outdoorSelectedCount >= 2
+    ) {
+      continue;
+    }
+
+    if (
+      isImportantInterior(key) &&
+      existing.length >=
+        familyAllowance(key)
+    ) {
+      continue;
+    }
+
+    if (
+      !isImportantInterior(key) &&
+      !isOutdoorFamily(key) &&
+      existing.length >= 1
     ) {
       continue;
     }
@@ -1661,9 +1700,9 @@ function combineOutput(
       photo.photoNumber
     );
 
-    usedRoomCounts.set(
+    selectedByFamily.set(
       key,
-      usedCount + 1
+      [...existing, photo]
     );
   }
 
@@ -1675,9 +1714,9 @@ function combineOutput(
     Math.min(
       maxScenes,
       Math.max(
-        10,
+        8,
         Math.round(
-          Math.sqrt(photos.length) * 1.7
+          Math.sqrt(photos.length) * 1.25
         )
       )
     );
@@ -1709,14 +1748,50 @@ function combineOutput(
       const key =
         roomKey(photo);
 
-      const usedCount =
-        usedRoomCounts.get(key) ?? 0;
+      const existing =
+        selectedByFamily.get(key) ?? [];
+
+      const outdoorSelectedCount =
+        Array.from(
+          selectedByFamily.entries()
+        )
+          .filter(
+            ([family]) =>
+              isOutdoorFamily(family)
+          )
+          .reduce(
+            (count, [, items]) =>
+              count + items.length,
+            0
+          );
 
       if (
         selectedSet.has(
           photo.photoNumber
-        ) ||
-        usedCount >= roomAllowance(key)
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        isOutdoorFamily(key) &&
+        outdoorSelectedCount >= 2
+      ) {
+        continue;
+      }
+
+      if (
+        isImportantInterior(key) &&
+        existing.length >=
+          familyAllowance(key)
+      ) {
+        continue;
+      }
+
+      if (
+        !isImportantInterior(key) &&
+        !isOutdoorFamily(key) &&
+        existing.length >= 1
       ) {
         continue;
       }
@@ -1729,9 +1804,9 @@ function combineOutput(
         photo.photoNumber
       );
 
-      usedRoomCounts.set(
+      selectedByFamily.set(
         key,
-        usedCount + 1
+        [...existing, photo]
       );
     }
   }
@@ -1825,7 +1900,7 @@ function combineOutput(
         reason:
           scene.duplicateOf > 0
             ? `Duplicate of Photo ${scene.duplicateOf}. ${scene.reason}`
-            : `Not selected by final quality, importance, animation-safety, and uniqueness gate. ${scene.reason}`,
+            : `Not selected by room-focused coverage, quality, animation-safety, and uniqueness gate. ${scene.reason}`,
       }));
 
   const estimatedRuntimeSeconds =
