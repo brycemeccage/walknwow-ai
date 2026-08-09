@@ -1536,10 +1536,7 @@ function combineOutput(
     [...photos]
       .filter(
         (photo) =>
-          photo.duplicateOf === 0 &&
-          photo.qualityScore >= 64 &&
-          photo.animationSuitabilityScore >= 55 &&
-          photo.blurRisk !== "high"
+          photo.duplicateOf === 0
       )
       .sort(
         (a, b) =>
@@ -1591,10 +1588,11 @@ function combineOutput(
       continue;
     }
 
-    if (score < 74) {
-      continue;
-    }
-
+    /*
+     * Rank photos relative to this listing.
+     * Do not reject the whole property because the vision model
+     * used conservative absolute scores.
+     */
     const label =
       `${photo.category} ${photo.roomLabel}`
         .toLowerCase();
@@ -1634,10 +1632,7 @@ function combineOutput(
       [...photos]
         .filter(
           (photo) =>
-            photo.duplicateOf === 0 &&
-            photo.qualityScore >= 58 &&
-            photo.animationSuitabilityScore >= 50 &&
-            photo.blurRisk !== "high"
+            photo.duplicateOf === 0
         )
         .sort(
           (a, b) =>
