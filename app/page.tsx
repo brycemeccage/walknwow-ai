@@ -692,34 +692,187 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      <nav className="border-b border-white/10">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <div className="text-2xl font-bold">
+    <main className="min-h-screen bg-[#05070a] text-white">
+      <nav className="sticky top-0 z-50 border-b border-white/10 bg-black/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <a href="#" className="text-2xl font-black tracking-tight">
             WalkNWow<span className="text-cyan-300">.AI</span>
+          </a>
+
+          <div className="hidden items-center gap-7 text-sm text-white/60 md:flex">
+            <a href="#how-it-works" className="transition hover:text-white">How it works</a>
+            <a href="#pricing" className="transition hover:text-white">Pricing</a>
+            <a href="#studio" className="transition hover:text-white">Create video</a>
           </div>
 
-          <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100">
-            V2 Retry Mode · 5 workers · 2K winners
-          </span>
+          <a
+            href="#studio"
+            className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-black transition hover:bg-cyan-100"
+          >
+            Start a video
+          </a>
         </div>
       </nav>
 
       <section className="px-6 py-16">
         <div className="mx-auto max-w-7xl">
-          <div className="mx-auto max-w-4xl text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">
-              AI real-estate production
-            </p>
+          <div className="mx-auto max-w-5xl text-center">
+            <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/[0.08] px-4 py-2 text-sm font-semibold text-cyan-100">
+              <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_14px_rgba(103,232,249,0.9)]" />
+              AI real-estate video production
+            </div>
 
-            <h1 className="mt-5 text-5xl font-bold tracking-tight sm:text-7xl">
-              One listing. One complete walkthrough.
+            <h1 className="mt-7 text-5xl font-black tracking-[-0.05em] sm:text-7xl lg:text-8xl">
+              Turn listing photos into
+              <span className="block bg-gradient-to-r from-white via-cyan-100 to-cyan-300 bg-clip-text text-transparent">
+                a property experience.
+              </span>
             </h1>
 
-            <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-white/55">
-              V2 extracts the listing, directs the property story, generates
-              lifelike scenes, inspects quality, retries weak clips, and builds
-              the final video.
+            <p className="mx-auto mt-7 max-w-3xl text-lg leading-8 text-white/55 sm:text-xl">
+              Paste a Zillow or Weichert listing. WalkNWow selects the strongest
+              rooms, creates realistic camera movement, adds music, and delivers
+              a polished real-estate video ready to share.
+            </p>
+
+            <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <a
+                href="#studio"
+                className="w-full rounded-2xl bg-cyan-300 px-7 py-4 font-bold text-black shadow-[0_15px_60px_rgba(103,232,249,0.18)] transition hover:bg-cyan-200 sm:w-auto"
+              >
+                Create your property video
+              </a>
+              <a
+                href="#pricing"
+                className="w-full rounded-2xl border border-white/15 bg-white/[0.04] px-7 py-4 font-semibold transition hover:bg-white/[0.08] sm:w-auto"
+              >
+                View pricing
+              </a>
+            </div>
+
+            <p className="mt-5 text-sm text-white/35">
+              Professional videos starting at <span className="font-semibold text-white/75">$99</span>
+            </p>
+          </div>
+
+          <section id="how-it-works" className="mx-auto mt-20 max-w-7xl">
+            <div className="grid gap-4 md:grid-cols-4">
+              {[
+                ["01", "Paste the listing", "Use a supported Zillow or Weichert property link."],
+                ["02", "AI directs the story", "WalkNWow chooses 1–2 strong views of the important rooms and keeps exterior coverage tight."],
+                ["03", "Generate the walkthrough", "Selected photos become restrained, realistic property scenes."],
+                ["04", "Finish & share", "Merge the clips, add music and branding, then download the finished video."],
+              ].map(([number, title, body]) => (
+                <div
+                  key={number}
+                  className="rounded-3xl border border-white/10 bg-white/[0.035] p-6 text-left"
+                >
+                  <span className="text-sm font-black text-cyan-300">{number}</span>
+                  <h3 className="mt-6 text-lg font-bold">{title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-white/45">{body}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section id="pricing" className="mx-auto mt-24 max-w-7xl">
+            <div className="mx-auto max-w-3xl text-center">
+              <p className="text-sm font-bold uppercase tracking-[0.22em] text-cyan-300">
+                Simple pricing
+              </p>
+              <h2 className="mt-4 text-4xl font-black tracking-tight sm:text-5xl">
+                Built for every kind of listing.
+              </h2>
+              <p className="mt-5 text-white/50">
+                Start at $99. Upgrade only when the property or production needs it.
+              </p>
+            </div>
+
+            <div className="mt-10 grid gap-5 lg:grid-cols-4">
+              <PricingCard
+                name="Essential"
+                price="$99"
+                description="Clean professional coverage for smaller listings."
+                features={[
+                  "Up to 1,750 sq ft",
+                  "Up to 13 selected photos",
+                  "AI scene selection",
+                  "Music included",
+                  "HD final video",
+                ]}
+              />
+              <PricingCard
+                name="Signature"
+                price="$129"
+                description="More room for larger listings and fuller storytelling."
+                features={[
+                  "1,751–2,500 sq ft",
+                  "14–18 selected photos",
+                  "Up to 1:30 final video",
+                  "AI scene selection",
+                  "Music included",
+                ]}
+              />
+              <PricingCard
+                name="Estate"
+                price="$150"
+                description="Extended coverage for larger and more detailed homes."
+                features={[
+                  "Larger properties",
+                  "Up to 25 selected photos",
+                  "Up to 2:15 final video",
+                  "AI scene selection",
+                  "Music included",
+                ]}
+              />
+              <PricingCard
+                name="Premium"
+                price="$199"
+                description="The complete real-estate marketing package."
+                featured
+                features={[
+                  "Any property size",
+                  "Any video length",
+                  "Voice-over included",
+                  "Subtitles included",
+                  "Agent closing card included",
+                ]}
+              />
+            </div>
+
+            <div className="mx-auto mt-6 grid max-w-3xl gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-6 py-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-bold">4K Upgrade</p>
+                    <p className="mt-1 text-sm text-white/45">Sharper premium final delivery.</p>
+                  </div>
+                  <span className="text-xl font-black text-cyan-300">+$35</span>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-6 py-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-bold">Agent Closing Card</p>
+                    <p className="mt-1 text-sm text-white/45">Headshot, brokerage and contact information.</p>
+                  </div>
+                  <span className="text-xl font-black text-cyan-300">+$10</span>
+                </div>
+                <p className="mt-2 text-xs text-white/30">Included with Premium.</p>
+              </div>
+            </div>
+          </section>
+
+          <div id="studio" className="mx-auto mt-24 max-w-4xl text-center">
+            <p className="text-sm font-bold uppercase tracking-[0.22em] text-cyan-300">
+              WalkNWow Studio
+            </p>
+            <h2 className="mt-4 text-4xl font-black tracking-tight sm:text-5xl">
+              Create your walkthrough.
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-white/50">
+              Paste a property listing below, review the AI-selected photos, then generate.
             </p>
           </div>
 
@@ -732,7 +885,7 @@ export default function Home() {
                 type="url"
                 value={listingUrl}
                 onChange={(event) => setListingUrl(event.target.value)}
-                placeholder="Paste a Zillow listing URL"
+                placeholder="Paste a Zillow or Weichert listing URL"
                 className="min-h-14 flex-1 rounded-2xl border border-white/10 bg-black px-5 outline-none placeholder:text-white/25 focus:border-cyan-300/60"
               />
 
@@ -741,7 +894,7 @@ export default function Home() {
                 disabled={isBusy}
                 className="min-h-14 rounded-2xl bg-white px-7 font-semibold text-black transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isExtracting || isDirecting ? "Preparing V2..." : "Create V2 project"}
+                {isExtracting || isDirecting ? "Preparing project..." : "Analyze listing"}
               </button>
             </div>
           </form>
@@ -977,6 +1130,67 @@ export default function Home() {
         </div>
       </section>
     </main>
+  );
+}
+
+
+function PricingCard({
+  name,
+  price,
+  description,
+  features,
+  featured = false,
+}: {
+  name: string;
+  price: string;
+  description: string;
+  features: string[];
+  featured?: boolean;
+}) {
+  return (
+    <div
+      className={`relative rounded-[2rem] border p-7 ${
+        featured
+          ? "border-cyan-300/50 bg-gradient-to-b from-cyan-300/[0.12] to-white/[0.035] shadow-[0_20px_80px_rgba(103,232,249,0.10)]"
+          : "border-white/10 bg-white/[0.03]"
+      }`}
+    >
+      {featured && (
+        <span className="absolute right-5 top-5 rounded-full bg-cyan-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-black">
+          Best value
+        </span>
+      )}
+
+      <p className="text-sm font-bold uppercase tracking-[0.18em] text-white/55">
+        {name}
+      </p>
+      <p className="mt-5 text-5xl font-black tracking-tight">{price}</p>
+      <p className="mt-4 min-h-12 text-sm leading-6 text-white/45">
+        {description}
+      </p>
+
+      <div className="my-6 h-px bg-white/10" />
+
+      <ul className="space-y-3 text-sm">
+        {features.map((feature) => (
+          <li key={feature} className="flex gap-3 text-white/70">
+            <span className="text-cyan-300">✓</span>
+            <span>{feature}</span>
+          </li>
+        ))}
+      </ul>
+
+      <a
+        href="#studio"
+        className={`mt-7 block rounded-xl px-4 py-3 text-center text-sm font-bold transition ${
+          featured
+            ? "bg-cyan-300 text-black hover:bg-cyan-200"
+            : "border border-white/15 bg-white/[0.04] hover:bg-white/[0.08]"
+        }`}
+      >
+        Choose {name}
+      </a>
+    </div>
   );
 }
 
