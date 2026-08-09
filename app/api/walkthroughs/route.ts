@@ -29,23 +29,29 @@ type ZillowResult = {
   city?: string;
   state?: string;
   zipcode?: string;
-
-  responsivePhotos?: Array<{
-    url?: string;
-  }>;
-
+  responsivePhotos?: Array<{ url?: string }>;
   photos?: ZillowPhoto[];
-
   originalPhotos?: ZillowPhoto[];
   images?: ZillowPhoto[];
-
   hiResImageLink?: string;
 };
 
 const MAX_LISTING_PHOTOS = 200;
 
-function normalizeZillowUrl(value: string): URL {
-  const parsed = new URL(value.trim());
+function isHttpUrl(
+  value: unknown
+): value is string {
+  return (
+    typeof value === "string" &&
+    /^https?:\/\//i.test(value.trim())
+  );
+}
+
+function normalizeListingUrl(
+  value: string
+): URL {
+  const parsed =
+    new URL(value.trim());
 
   if (
     parsed.protocol !== "http:" &&
@@ -56,38 +62,35 @@ function normalizeZillowUrl(value: string): URL {
     );
   }
 
-  const hostname =
-    parsed.hostname
-      .toLowerCase()
-      .replace(/^www\./, "");
-
-  if (
-    hostname !== "zillow.com" &&
-    !hostname.endsWith(".zillow.com")
-  ) {
-    throw new Error(
-      "Please use a Zillow property link."
-    );
-  }
-
-  /*
-   * Keep only the actual property URL. Search-state and tracking
-   * query parameters are not needed by the Apify detail scraper.
-   */
   parsed.search = "";
   parsed.hash = "";
 
   return parsed;
 }
 
-function isHttpUrl(
-  value: unknown
-): value is string {
+function normalizedHost(
+  url: URL
+): string {
+  return url.hostname
+    .toLowerCase()
+    .replace(/^www\./, "");
+}
+
+function isZillowHost(
+  host: string
+): boolean {
   return (
-    typeof value === "string" &&
-    /^https?:\/\//i.test(
-      value.trim()
-    )
+    host === "zillow.com" ||
+    host.endsWith(".zillow.com")
+  );
+}
+
+function isWeichertHost(
+  host: string
+): boolean {
+  return (
+    host === "weichert.com" ||
+    host.endsWith(".weichert.com")
   );
 }
 
@@ -135,9 +138,14 @@ function addPhotoArray(
   photos: ZillowPhoto[] | undefined,
   discovered: Set<string>
 ): void {
-  for (const photo of photos ?? []) {
+  for (
+    const photo of
+    photos ?? []
+  ) {
     const url =
-      chooseBestPhotoUrl(photo);
+      chooseBestPhotoUrl(
+        photo
+      );
 
     if (url) {
       discovered.add(url);
@@ -152,15 +160,16 @@ function addPhotoArray(
   }
 }
 
-function extractImages(
+function extractZillowImages(
   result: ZillowResult
 ): string[] {
   const discovered =
     new Set<string>();
 
   /*
-   * Prefer Zillow's canonical ordered responsive photo list.
-   * This usually represents exactly the listing gallery.
+   * responsivePhotos is the canonical Zillow gallery when available.
+   * Do not merge alternate arrays into it because that can duplicate
+   * the entire gallery at different resolutions.
    */
   for (
     const photo of
@@ -180,16 +189,9 @@ function extractImages(
     }
   }
 
-  /*
-   * IMPORTANT:
-   * responsivePhotos is the canonical Zillow gallery when present.
-   * Do NOT merge photos/originalPhotos/images into it, because Apify
-   * often returns the same listing gallery again in alternate URL/
-   * resolution shapes. That was doubling an 86-photo listing to 172.
-   *
-   * Only use the alternate arrays when responsivePhotos is empty.
-   */
-  if (discovered.size === 0) {
+  if (
+    discovered.size === 0
+  ) {
     addPhotoArray(
       result.photos,
       discovered
@@ -225,6 +227,308 @@ function extractImages(
   );
 }
 
+function decodeHtml(
+  value: string
+): string {
+  return value
+    .replaceAll("&amp;", "&")
+    .replaceAll("&#x2F;", "/")
+    .replaceAll("&#47;", "/")
+    .replaceAll("\\/", "/")
+    .replaceAll("\\u002F", "/");
+}
+
+function photoSequence(
+  url: string
+): number {
+  const match =
+    url.match(
+      /-(\d+)\.(?:jpe?g|png|webp)(?:$|\?)/i
+    );
+
+  return match
+    ? Number(match[1])
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function extractWeichertImages(
+  html: string
+): string[] {
+  const decoded =
+    decodeHtml(html);
+
+  const discovered =
+    new Set<string>();
+
+  /*
+   * Weichert listing galleries currently use URLs like:
+   * https://d36xftgacqn2p.cloudfront.net/listingphotos38/4045538-1.jpg
+   *
+   * We intentionally scope to "listingphotos" paths so logos, ads,
+   * nearby listings, agent photos, and other page imagery are ignored.
+   */
+  const absoluteMatches =
+    decoded.match(
+      /https?:\/\/[^"'<> \n\r\t]+\/listingphotos\d*\/[^"'<> \n\r\t]+?\.(?:jpe?g|png|webp)(?:\?[^"'<> \n\r\t]*)?/gi
+    ) ?? [];
+
+  for (
+    const value of
+    absoluteMatches
+  ) {
+    try {
+      const url =
+        new URL(value);
+
+      if (
+        url.pathname
+          .toLowerCase()
+          .includes(
+            "/listingphotos"
+          )
+      ) {
+        url.search = "";
+        url.hash = "";
+
+        discovered.add(
+          url.toString()
+        );
+      }
+    } catch {
+      // Ignore malformed image candidates.
+    }
+  }
+
+  /*
+   * Fallback for relative listing-photo URLs.
+   */
+  const relativeMatches =
+    decoded.match(
+      /["'(=]\s*(\/[^"'<> \n\r\t]*listingphotos\d*\/[^"'<> \n\r\t]+?\.(?:jpe?g|png|webp))/gi
+    ) ?? [];
+
+  for (
+    const match of
+    relativeMatches
+  ) {
+    const relative =
+      match
+        .replace(
+          /^["'(=]\s*/,
+          ""
+        )
+        .trim();
+
+    try {
+      const absolute =
+        new URL(
+          relative,
+          "https://www.weichert.com"
+        );
+
+      discovered.add(
+        absolute.toString()
+      );
+    } catch {
+      // Ignore malformed relative candidates.
+    }
+  }
+
+  return Array.from(
+    discovered
+  )
+    .sort(
+      (a, b) =>
+        photoSequence(a) -
+        photoSequence(b)
+    )
+    .slice(
+      0,
+      MAX_LISTING_PHOTOS
+    );
+}
+
+function extractWeichertTitle(
+  html: string
+): string {
+  const decoded =
+    decodeHtml(html);
+
+  const ogTitle =
+    decoded.match(
+      /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i
+    )?.[1] ??
+    decoded.match(
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i
+    )?.[1];
+
+  if (ogTitle) {
+    return ogTitle
+      .replace(/\s*\|\s*Weichert.*$/i, "")
+      .trim();
+  }
+
+  const title =
+    decoded.match(
+      /<title[^>]*>([^<]+)<\/title>/i
+    )?.[1];
+
+  return (
+    title
+      ?.replace(/\s*\|\s*Weichert.*$/i, "")
+      .trim() ||
+    "Weichert property"
+  );
+}
+
+async function extractFromWeichert(
+  parsedUrl: URL
+): Promise<{
+  images: string[];
+  pageTitle: string;
+}> {
+  const response =
+    await fetch(
+      parsedUrl.toString(),
+      {
+        redirect: "follow",
+        cache: "no-store",
+        signal:
+          AbortSignal.timeout(
+            60000
+          ),
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml",
+          "Accept-Language":
+            "en-US,en;q=0.9",
+        },
+      }
+    );
+
+  if (!response.ok) {
+    throw new Error(
+      `Weichert returned status ${response.status}.`
+    );
+  }
+
+  const html =
+    await response.text();
+
+  const images =
+    extractWeichertImages(
+      html
+    );
+
+  if (
+    images.length === 0
+  ) {
+    throw new Error(
+      "The Weichert property page loaded, but no listing-gallery photos were found."
+    );
+  }
+
+  return {
+    images,
+    pageTitle:
+      extractWeichertTitle(
+        html
+      ),
+  };
+}
+
+async function extractFromZillow(
+  parsedUrl: URL
+): Promise<{
+  images: string[];
+  pageTitle: string;
+}> {
+  const token =
+    process.env
+      .APIFY_API_TOKEN;
+
+  if (!token) {
+    throw new Error(
+      "The Apify API token is missing."
+    );
+  }
+
+  const client =
+    new ApifyClient({
+      token,
+    });
+
+  const run =
+    await client
+      .actor(
+        "maxcopell/zillow-detail-scraper"
+      )
+      .call({
+        propertyStatus:
+          "FOR_SALE",
+        startUrls: [
+          {
+            url:
+              parsedUrl.toString(),
+          },
+        ],
+      });
+
+  const { items } =
+    await client
+      .dataset(
+        run.defaultDatasetId
+      )
+      .listItems({
+        limit: 5,
+      });
+
+  if (
+    items.length === 0
+  ) {
+    throw new Error(
+      "Apify did not return any property information."
+    );
+  }
+
+  const property =
+    items[0] as ZillowResult;
+
+  const images =
+    extractZillowImages(
+      property
+    );
+
+  if (
+    images.length === 0
+  ) {
+    throw new Error(
+      "The Zillow property was found, but no listing-gallery photos were extracted."
+    );
+  }
+
+  const addressParts = [
+    property.address
+      ?.streetAddress ??
+      property.streetAddress,
+    property.address?.city ??
+      property.city,
+    property.address?.state ??
+      property.state,
+    property.address?.zipcode ??
+      property.zipcode,
+  ].filter(Boolean);
+
+  return {
+    images,
+    pageTitle:
+      addressParts.join(", ") ||
+      "Zillow property",
+  };
+}
+
 export async function POST(
   request: Request
 ) {
@@ -255,17 +559,15 @@ export async function POST(
 
     try {
       parsedUrl =
-        normalizeZillowUrl(
+        normalizeListingUrl(
           listingUrl
         );
-    } catch (error) {
+    } catch {
       return NextResponse.json(
         {
           success: false,
           message:
-            error instanceof Error
-              ? error.message
-              : "Please enter a valid Zillow listing URL.",
+            "Please enter a valid listing URL.",
         },
         {
           status: 400,
@@ -273,121 +575,63 @@ export async function POST(
       );
     }
 
-    const token =
-      process.env.APIFY_API_TOKEN;
-
-    if (!token) {
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "The Apify API token is missing.",
-        },
-        {
-          status: 500,
-        }
+    const host =
+      normalizedHost(
+        parsedUrl
       );
-    }
 
-    const client =
-      new ApifyClient({
-        token,
-      });
+    let source:
+      | "zillow"
+      | "weichert";
 
-    console.log(
-      "Starting Zillow extraction:",
-      parsedUrl.toString()
-    );
-
-    const run =
-      await client
-        .actor(
-          "maxcopell/zillow-detail-scraper"
-        )
-        .call({
-          propertyStatus:
-            "FOR_SALE",
-          startUrls: [
-            {
-              url:
-                parsedUrl.toString(),
-            },
-          ],
-        });
-
-    const { items } =
-      await client
-        .dataset(
-          run.defaultDatasetId
-        )
-        .listItems({
-          limit: 5,
-        });
+    let extraction: {
+      images: string[];
+      pageTitle: string;
+    };
 
     if (
-      items.length === 0
+      isZillowHost(host)
     ) {
+      source = "zillow";
+
+      console.log(
+        "Starting Zillow extraction:",
+        parsedUrl.toString()
+      );
+
+      extraction =
+        await extractFromZillow(
+          parsedUrl
+        );
+    } else if (
+      isWeichertHost(host)
+    ) {
+      source = "weichert";
+
+      console.log(
+        "Starting Weichert extraction:",
+        parsedUrl.toString()
+      );
+
+      extraction =
+        await extractFromWeichert(
+          parsedUrl
+        );
+    } else {
       return NextResponse.json(
         {
           success: false,
           message:
-            "Apify did not return any property information.",
+            "Supported listing sites are Zillow and Weichert.",
         },
         {
-          status: 502,
+          status: 400,
         }
       );
     }
-
-    const property =
-      items[0] as ZillowResult;
-
-    const images =
-      extractImages(
-        property
-      );
-
-    if (
-      images.length === 0
-    ) {
-      console.error(
-        "Apify returned a property but no listing-gallery images.",
-        {
-          datasetId:
-            run.defaultDatasetId,
-          availableKeys:
-            Object.keys(
-              property
-            ),
-        }
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "The property was found, but no listing-gallery photos were extracted.",
-        },
-        {
-          status: 502,
-        }
-      );
-    }
-
-    const addressParts = [
-      property.address
-        ?.streetAddress ??
-        property.streetAddress,
-      property.address?.city ??
-        property.city,
-      property.address?.state ??
-        property.state,
-      property.address?.zipcode ??
-        property.zipcode,
-    ].filter(Boolean);
 
     console.log(
-      `Extracted ${images.length} listing-gallery photos.`
+      `Extracted ${extraction.images.length} ${source} listing photos.`
     );
 
     return NextResponse.json({
@@ -396,20 +640,21 @@ export async function POST(
         crypto.randomUUID(),
       listingUrl:
         parsedUrl.toString(),
+      source,
       pageTitle:
-        addressParts.join(", ") ||
-        "Zillow property",
+        extraction.pageTitle,
       imageCount:
-        images.length,
-      images,
+        extraction.images.length,
+      images:
+        extraction.images,
       status:
         "photos-extracted",
       message:
-        `Found ${images.length} Zillow property photos.`,
+        `Found ${extraction.images.length} ${source === "zillow" ? "Zillow" : "Weichert"} property photos.`,
     });
   } catch (error) {
     console.error(
-      "Apify Zillow extraction error:",
+      "Listing extraction error:",
       error
     );
 
@@ -418,8 +663,8 @@ export async function POST(
         success: false,
         message:
           error instanceof Error
-            ? `Apify could not process that Zillow listing: ${error.message}`
-            : "Apify could not process that Zillow listing.",
+            ? error.message
+            : "The listing could not be processed.",
       },
       {
         status: 500,
