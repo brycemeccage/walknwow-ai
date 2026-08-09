@@ -374,14 +374,20 @@ export async function POST(
 
     const walkthroughRules =
       motionAmount === "micro"
-        ? "Create a real stabilized walkthrough feel using a very small forward camera translation with subtle natural parallax. Do not simulate motion by simply zooming or panning a flat still image."
-        : "Create a real stabilized walkthrough feel using a slow gentle forward camera translation with visible but restrained natural parallax between foreground and background. Do not simulate motion by simply zooming, cropping, or panning a flat still image.";
+        ? "Use a tiny stabilized forward camera translation with real subtle parallax only inside geometry already supported by the source image. Keep framing conservative. Do not pan, orbit, zoom, crop-drift, reveal around corners, or expose hidden areas."
+        : "Use a slow stabilized forward camera translation with restrained natural parallax only inside geometry already supported by the source image. Keep framing conservative. Do not pan, orbit, zoom, crop-drift, reveal around corners, or expose hidden areas.";
 
-    const fidelityRules =
-      "Use the source image as strict ground truth. Preserve every visible object, wall, window, door, fixture, furnishing, material, reflection, exterior view, tree, plant, landscape feature, object count, and object position. Never invent unseen rooms or objects. Keep straight lines, proportions, furniture, decor, trees, branches, foliage silhouettes, and window views stable. Begin fully sharp, remain fully sharp through the middle, and end fully sharp. No focus pull, depth-of-field blur, motion smear, softening, shimmer, morphing, exposure shift, or texture regeneration.";
+    const visibilityLock =
+      "SOURCE-VISIBILITY LOCK: the source photograph is the complete visual truth. Motion may reproject visible surfaces but must not expose, complete, extrapolate, or invent anything hidden behind furniture, walls, doors, counters, islands, trees, frame edges, or foreground objects. If motion would require guessing newly visible content, reduce travel distance instead.";
+
+    const objectLock =
+      "IDENTITY LOCK: preserve exact object count, placement, shape, size, color, material, texture, fixtures, furniture, cabinetry, windows, doors, reflections, trees, trunks, branches, foliage silhouettes, grass, fences, decks, horizon, and window views. Objects may shift on screen only from true camera parallax. Nothing may independently move, appear, disappear, morph, split, merge, restage, redesign, or regenerate.";
+
+    const sharpnessLock =
+      "SHARPNESS LOCK: opening, middle, and ending must be equally crisp. No focus settling, focus pull, depth-of-field blur, motion smear, texture softening, shimmer, crawling detail, exposure shift, or sharpening ramp.";
 
     const promptText =
-      `${baseScenePrompt.slice(0, 300)} ${walkthroughRules} ${fidelityRules}`.slice(0, 995);
+      `${baseScenePrompt.slice(0, 150)} ${walkthroughRules} ${visibilityLock} ${objectLock} ${sharpnessLock}`.slice(0, 995);
 
     const propertyLockSummary =
       summarizePropertyLock(
@@ -437,11 +443,11 @@ export async function POST(
       category,
       productionPreset: {
         key: "preset_a",
-        label: "Balanced Walkthrough 5s",
+        label: "Visibility-Locked Walkthrough 5s",
         durationSeconds: 5,
         cameraBehavior: "stabilized_forward_translation",
         motionBehavior:
-          "walkthrough_parallax_with_fidelity_lock",
+          "visibility_locked_walkthrough_parallax",
       },
       propertyLock: {
         ...propertyLockSummary,
