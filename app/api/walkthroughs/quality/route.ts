@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
+import ffmpegStatic from "ffmpeg-static";
+import ffprobeStatic from "ffprobe-static";
 
 import { assessArchitecture } from "@/lib/quality/architecture";
 import { assessBlurFromScores } from "@/lib/quality/blur";
@@ -17,6 +19,16 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const execFileAsync = promisify(execFile);
+
+const FFMPEG_PATH =
+  process.env.FFMPEG_PATH?.trim() ||
+  ffmpegStatic ||
+  "ffmpeg";
+
+const FFPROBE_PATH =
+  process.env.FFPROBE_PATH?.trim() ||
+  ffprobeStatic.path ||
+  "ffprobe";
 
 type RiskLevel = "low" | "medium" | "high";
 
@@ -52,17 +64,12 @@ type QualityAnalysis = {
   pass: boolean;
   overallScore: number;
   sharpnessScore: number;
-  openingSharpness: number;
-  middleSharpness: number;
-  endingSharpness: number;
   architectureScore: number;
   geometryScore: number;
   continuityScore: number;
   motionScore: number;
   flickerScore: number;
   openingBlurDetected: boolean;
-  middleBlurDetected: boolean;
-  endingBlurDetected: boolean;
   architectureChanged: boolean;
   geometryWarpDetected: boolean;
   furnitureOrFixtureChanged: boolean;
@@ -354,7 +361,7 @@ async function getVideoDuration(
 ): Promise<number> {
   const { stdout } =
     await execFileAsync(
-      "ffprobe",
+      FFPROBE_PATH,
       [
         "-v",
         "error",
@@ -390,7 +397,7 @@ async function extractFrame(
   outputPath: string
 ): Promise<void> {
   await execFileAsync(
-    "ffmpeg",
+    FFMPEG_PATH,
     [
       "-y",
       "-ss",
@@ -478,9 +485,8 @@ Any clear architecture change, geometry warp, furniture or fixture change, veget
 
 SHARPNESS
 
-The opening, middle, and ending frames must all be fully resolved and crisp.
-Do not average away a soft section. If any sampled frame is visibly softer, smeared, unresolved, or loses fine texture compared with the source, score that frame below 90.
-A clip that starts sharp but becomes soft later is not client-ready.
+The opening frame must already be fully resolved.
+Do not excuse blur because later frames become sharper.
 
 MOTION
 
@@ -705,20 +711,9 @@ function normalizeAnalysis(
     architecture.furnitureOrFixtureChanged;
 
   const openingBlurDetected =
-    raw.openingSharpness < 90 ||
+    raw.openingSharpness < 88 ||
+    scores.sharpnessScore < 88 ||
     blur.openingBlurDetected;
-
-  const middleBlurDetected =
-    raw.middleSharpness < 90;
-
-  const endingBlurDetected =
-    raw.endingSharpness < 90;
-
-  const fullClipSharpnessFailure =
-    openingBlurDetected ||
-    middleBlurDetected ||
-    endingBlurDetected ||
-    scores.sharpnessScore < 90;
 
   const vegetationDriftDetected =
     raw.vegetationDriftDetected === true;
@@ -746,13 +741,11 @@ function normalizeAnalysis(
   const pass =
     !shouldRejectQuality({
       overallScore,
-      openingBlurDetected:
-        fullClipSharpnessFailure,
+      openingBlurDetected,
       architectureChanged,
       geometryWarpDetected,
       furnitureOrFixtureChanged,
     }) &&
-    !fullClipSharpnessFailure &&
     !vegetationDriftDetected &&
     !lightingFlickerDetected &&
     !raw.excessiveMotionDetected &&
@@ -762,12 +755,7 @@ function normalizeAnalysis(
     pass,
     overallScore,
     ...scores,
-    openingSharpness: clampScore(raw.openingSharpness),
-    middleSharpness: clampScore(raw.middleSharpness),
-    endingSharpness: clampScore(raw.endingSharpness),
     openingBlurDetected,
-    middleBlurDetected,
-    endingBlurDetected,
     architectureChanged,
     geometryWarpDetected,
     furnitureOrFixtureChanged,
