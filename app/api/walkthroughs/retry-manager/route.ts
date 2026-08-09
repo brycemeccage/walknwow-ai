@@ -257,18 +257,42 @@ function retryRules(
 
 async function postJson<T>(
   url: string,
-  body: unknown
+  body: unknown,
+  inboundRequest: Request
 ): Promise<{
   ok: boolean;
   status: number;
   data: T;
 }> {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+  });
+
+  /*
+   * Retry Manager calls sibling API routes through the same deployed
+   * Vercel origin. Forward the inbound authentication/session headers
+   * so Deployment Protection does not reject those internal requests
+   * with 401 before generate-clip or quality can run.
+   */
+  const forwardedHeaderNames = [
+    "authorization",
+    "cookie",
+    "x-vercel-protection-bypass",
+    "x-vercel-set-bypass-cookie",
+  ];
+
+  for (const name of forwardedHeaderNames) {
+    const value =
+      inboundRequest.headers.get(name);
+
+    if (value) {
+      headers.set(name, value);
+    }
+  }
+
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type":
-        "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
     cache: "no-store",
   });
@@ -412,7 +436,8 @@ export async function POST(
               propertyDNA:
                 body.propertyDNA ??
                 {},
-            }
+            },
+            request
           );
 
         generatedVideoUrl =
@@ -458,7 +483,8 @@ export async function POST(
                 propertyLock:
                   generation.data
                     .propertyLock,
-              }
+              },
+              request
             );
 
           if (
