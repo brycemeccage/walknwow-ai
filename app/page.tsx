@@ -291,14 +291,16 @@ export default function Home() {
       if (selected.length === 0) {
         selected = uniqueValidPhotoNumbers(
           payload.scenes
-            ?.filter((scene) => scene.include !== false)
+            ?.filter((scene) => scene.include === true)
             .map((scene) => scene.photoNumber),
           photos.length
         );
       }
 
       if (selected.length === 0) {
-        selected = photos.map((_, index) => index + 1);
+        throw new Error(
+          "Director returned no selected photos. Refusing to fall back to all listing photos."
+        );
       }
 
       const normalizedScenes = selected.map(
