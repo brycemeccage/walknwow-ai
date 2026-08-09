@@ -241,12 +241,64 @@ export async function POST(request: Request) {
 
     await concatClips(normalized, silentPath, tempDirectory);
 
-    let musicUrl = new URL(`/music/${profile}/${track}`, request.url).toString();
+    const selectedMusicPath =
+      path.join(
+        process.cwd(),
+        "public",
+        "music",
+        profile,
+        track
+      );
+
+    const fallbackMusicPath =
+      path.join(
+        process.cwd(),
+        "public",
+        "music",
+        "walknwow-theme.mp3"
+      );
+
     try {
-      await downloadFile(musicUrl, musicPath, `${profile} music`);
-    } catch {
-      musicUrl = new URL("/music/walknwow-theme.mp3", request.url).toString();
-      await downloadFile(musicUrl, musicPath, "fallback music");
+      const selectedMusic =
+        await readFile(
+          selectedMusicPath
+        );
+
+      if (
+        selectedMusic.length === 0
+      ) {
+        throw new Error(
+          "Selected music file was empty."
+        );
+      }
+
+      await writeFile(
+        musicPath,
+        selectedMusic
+      );
+    } catch (musicError) {
+      console.error(
+        `Could not read selected ${profile} track locally; using fallback.`,
+        musicError
+      );
+
+      const fallbackMusic =
+        await readFile(
+          fallbackMusicPath
+        );
+
+      if (
+        fallbackMusic.length === 0
+      ) {
+        throw new Error(
+          "Fallback music file was empty."
+        );
+      }
+
+      await writeFile(
+        musicPath,
+        fallbackMusic
+      );
     }
 
     const totalDuration = normalized.length * CLIP_DURATION;

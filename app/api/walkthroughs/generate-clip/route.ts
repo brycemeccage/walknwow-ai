@@ -372,22 +372,53 @@ export async function POST(
         ? "micro"
         : "subtle";
 
-    const walkthroughRules =
+    /*
+     * REALISM-FIRST CAMERA POLICY
+     *
+     * The source photograph is a 2D observation, not a complete 3D world.
+     * We intentionally prefer a smaller believable move over a larger move
+     * that forces the video model to invent unseen geometry.
+     */
+    const cameraRule =
       motionAmount === "micro"
-        ? "Use a tiny stabilized forward camera translation with real subtle parallax while staying entirely inside the original source photograph's visible field of view. The virtual camera may move through depth already visible in the photograph, but it must never travel past a doorway, opening, wall edge, furniture edge, foreground occluder, or image boundary."
-        : "Use a slow stabilized forward camera translation with restrained natural parallax while staying entirely inside the original source photograph's visible field of view. The virtual camera may move through depth already visible in the photograph, but it must never travel past a doorway, opening, wall edge, furniture edge, foreground occluder, or image boundary.";
+        ? "REALISM CAMERA: use an extremely small stabilized push-in, approximately 1-2 percent of visible scene depth. Create only gentle parallax from surfaces that are already fully visible in the source image. If safe parallax is not possible, use an almost-static stabilized hold with tiny natural camera drift."
+        : "REALISM CAMERA: use a very small stabilized push-in, approximately 2-3 percent of visible scene depth. Create only gentle parallax from surfaces that are already fully visible in the source image. Prefer less movement over any invented geometry. If the move approaches an occlusion or unknown area, immediately stop forward travel.";
 
-    const visibilityLock =
-      "HARD SOURCE-BOUNDARY LOCK: move WITHIN the photograph, never BEYOND the photograph. The first frame defines the maximum known scene. Never reveal new space outside the original frame and never see around, behind, past, or through an occluding edge. A doorway or opening visible in the source may remain visible exactly as shown, but the camera must not advance through it or reveal more of the adjoining space. Frame edges are hard scene boundaries, not hidden world content. If any motion would expose even a small unsupported area, stop forward travel before that boundary and preserve motion only as subtle parallax within already-visible surfaces. Never complete an unseen room, corridor, wall, floor, ceiling, cabinet side, furniture side, landscape area, neighboring structure, or exterior view.";
+    const sourceBoundaryRule =
+      "ABSOLUTE 2D SOURCE BOUNDARY: treat the source photograph as the complete and final visual world. There is NO valid scene information outside the photographed pixels and NO hidden geometry may be inferred. Never reveal pixels that would require seeing farther left, right, above, below, behind, around, through, or beyond anything visible in the source. Never extend the room, exterior, landscape, floor, ceiling, wall, deck, yard, water, sky, or neighboring area beyond what the photograph explicitly shows.";
 
-    const objectLock =
-      "IDENTITY LOCK: preserve exact object count, placement, shape, size, color, material, texture, fixtures, furniture, cabinetry, windows, doors, reflections, trees, trunks, branches, foliage silhouettes, grass, fences, decks, horizon, and window views. Objects may shift on screen only from true camera parallax. Nothing may independently move, appear, disappear, morph, split, merge, restage, redesign, or regenerate.";
+    const occlusionRule =
+      "OCCLUSION LOCK: doorways, halls, openings, corners, wall edges, cabinet edges, furniture edges, railings, trees, foreground objects, frame edges, and cropped objects are hard stopping planes. Never move through them. Never look around them. Never expose their hidden back side. Never complete a cropped object. Never reveal an adjoining room or unseen continuation of a space. What is hidden in the source must remain hidden for the entire clip.";
 
-    const sharpnessLock =
-      "SHARPNESS LOCK: opening, middle, and ending must be equally crisp. No focus settling, focus pull, depth-of-field blur, motion smear, texture softening, shimmer, crawling detail, exposure shift, or sharpening ramp.";
+    const compositionRule =
+      "COMPOSITION LOCK: keep the same overall framing, lens character, perspective, room proportions, horizon, and visible content as the source. The ending frame must still look unmistakably like the same photograph from only a slightly advanced camera position. Do not widen the field of view, zoom out, orbit, pan around a corner, rotate to discover new content, or create a new camera angle.";
 
+    const identityRule =
+      "PROPERTY IDENTITY LOCK: preserve every visible architectural line, wall, ceiling, floor, window, door, cabinet, countertop, appliance, fixture, furnishing, decor item, reflection, tree trunk, branch, foliage silhouette, grass area, fence, deck, shoreline, water shape, horizon, and exterior view. Preserve exact object count, placement, shape, size, color, material, and texture. Nothing may appear, disappear, move independently, morph, split, merge, restage, redesign, regenerate, or be replaced.";
+
+    const temporalRule =
+      "TEMPORAL REALISM: opening, middle, and ending frames must remain equally crisp and structurally consistent. No focus settling, depth-of-field blur, motion smear, texture crawling, shimmer, melting, exposure pumping, geometry breathing, foliage regeneration, or sharpening ramp.";
+
+    const negativeRule =
+      "NEVER DO: room extension, doorway traversal, corner reveal, behind-object reveal, new furniture, new architecture, invented windows, invented doors, invented landscape, invented neighboring structures, generated unseen wall/floor/ceiling surfaces, camera orbit, large dolly, wide-angle expansion, zoom-out, Ken Burns pan, or cinematic movement that requires hallucinating new content.";
+
+    /*
+     * Put the hard constraints FIRST. Runway prompt length is limited, so
+     * property/story context is appended only after the non-negotiable rules.
+     */
     const promptText =
-      `${baseScenePrompt.slice(0, 150)} ${walkthroughRules} ${visibilityLock} ${objectLock} ${sharpnessLock}`.slice(0, 995);
+      [
+        sourceBoundaryRule,
+        occlusionRule,
+        cameraRule,
+        compositionRule,
+        identityRule,
+        temporalRule,
+        negativeRule,
+        baseScenePrompt.slice(0, 180),
+      ]
+        .join(" ")
+        .slice(0, 995);
 
     const propertyLockSummary =
       summarizePropertyLock(
