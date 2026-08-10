@@ -1,113 +1,128 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import LogoutButton from "@/components/auth/logout-button";
+import { useEffect, useState } from "react";
 
-type SiteNavProps = {
-  signedIn?: boolean;
-  userLabel?: string;
-};
+import LogoutButton from "@/components/auth/logout-button";
+import { createClient } from "@/utils/supabase/client";
 
 export default function SiteNav({
   signedIn = false,
   userLabel = "",
-}: SiteNavProps) {
-  const pathname = usePathname();
+}: {
+  signedIn?: boolean;
+  userLabel?: string;
+}) {
+  const [sessionSignedIn, setSessionSignedIn] = useState(signedIn);
 
-  const items = signedIn
-    ? [
-        { href: "/home", label: "Home" },
-        { href: "/home#studio", label: "New Project" },
-        { href: "/dashboard#videos", label: "Past Videos" },
-        { href: "/dashboard#profile", label: "Agent Profile" },
-        { href: "/dashboard#billing", label: "Billing" },
-      ]
-    : [
-        { href: "/home", label: "Home" },
-        { href: "/home#examples", label: "Examples" },
-        { href: "/home#pricing", label: "Pricing" },
-        { href: "/home#contact", label: "Contact" },
-      ];
+  useEffect(() => {
+    const supabase = createClient();
 
-  return (
-    <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#05070a]/90 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
-        <Link href="/home" className="flex shrink-0 items-center gap-3">
-          <span className="flex h-10 w-10 overflow-hidden rounded-xl bg-white">
+    supabase.auth.getUser().then(({ data }) => {
+      setSessionSignedIn(Boolean(data.user));
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSessionSignedIn(Boolean(session?.user));
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const isSignedIn = signedIn || sessionSignedIn;
+
+  if (signedIn) {
+    return (
+      <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#05070a]/95 text-white backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+          <Link href="/home" className="flex items-center gap-3">
             <img
               src="/branding/walknwow-logo.png"
-              alt="WalkNWow AI logo"
-              className="h-full w-full object-cover"
+              alt="WalkNWow AI"
+              className="h-10 w-10 rounded-xl bg-white object-cover"
             />
-          </span>
+            <span className="text-xl font-black">
+              WalkNWow<span className="text-cyan-300">.AI</span>
+            </span>
+          </Link>
 
-          <span className="text-xl font-black sm:text-2xl">
-            WalkNWow<span className="text-cyan-300">.AI</span>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard"
+              className="rounded-xl px-4 py-2.5 text-sm font-bold text-white/70 hover:bg-white/[.06]"
+            >
+              Dashboard
+            </Link>
+
+            {userLabel && (
+              <span className="hidden text-sm text-white/30 lg:block">
+                {userLabel}
+              </span>
+            )}
+
+            <LogoutButton />
+          </div>
+        </div>
+      </nav>
+    );
+  }
+
+  return (
+    <nav className="sticky top-0 z-50 border-b border-slate-200/70 bg-[#fffaf4]/95 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
+        <Link href="/home" className="flex items-center gap-3">
+          <img
+            src="/branding/walknwow-logo.png"
+            alt="WalkNWow AI"
+            className="h-10 w-10 rounded-xl bg-white object-cover shadow-sm"
+          />
+          <span className="text-xl font-black text-[#172026]">
+            WalkNWow<span className="text-cyan-600">.AI</span>
           </span>
         </Link>
 
-        <div className="hidden items-center gap-5 text-sm text-white/55 lg:flex">
-          {items.map((item) => {
-            const active =
-              item.href === pathname ||
-              (item.href === "/home" && pathname === "/home");
-
-            return (
-              <Link
-                key={item.href + item.label}
-                href={item.href}
-                className={`transition hover:text-white ${
-                  active ? "text-white" : ""
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+        <div className="hidden items-center gap-6 md:flex">
+          <a
+            href="/home#how-it-works"
+            className="text-sm font-bold text-slate-500 hover:text-cyan-600"
+          >
+            How It Works
+          </a>
+          <a
+            href="/home#pricing"
+            className="text-sm font-bold text-slate-500 hover:text-cyan-600"
+          >
+            Pricing
+          </a>
         </div>
 
-        <div className="flex items-center gap-3">
-          {signedIn ? (
-            <>
-              {userLabel && (
-                <span className="hidden max-w-44 truncate text-sm text-white/40 sm:block">
-                  {userLabel}
-                </span>
-              )}
-              <LogoutButton />
-            </>
-          ) : (
-            <>
-              <Link
-                href="/"
-                className="hidden rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-white/70 hover:bg-white/[0.05] sm:block"
-              >
-                Log in
-              </Link>
-
-              <Link
-                href="/"
-                className="rounded-xl bg-cyan-300 px-4 py-2.5 text-sm font-bold text-black hover:bg-cyan-200"
-              >
-                Create account
-              </Link>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="border-t border-white/5 px-3 py-2 lg:hidden">
-        <div className="flex gap-2 overflow-x-auto">
-          {items.map((item) => (
+        <div className="flex items-center gap-2">
+          {isSignedIn ? (
             <Link
-              key={item.href + item.label}
-              href={item.href}
-              className="whitespace-nowrap rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-white/60"
+              href="/dashboard"
+              className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:text-cyan-600"
             >
-              {item.label}
+              Dashboard
             </Link>
-          ))}
+          ) : (
+            <Link
+              href="/login"
+              className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:text-cyan-600"
+            >
+              Log in
+            </Link>
+          )}
+
+          <Link
+            href="/projects/new"
+            className="rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-black text-white shadow-sm"
+          >
+            Create Video
+          </Link>
         </div>
       </div>
     </nav>
