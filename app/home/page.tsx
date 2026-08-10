@@ -2,6 +2,8 @@
 
 import { FormEvent, useMemo, useState } from "react";
 
+import SiteNav from "@/components/layout/site-nav";
+
 type RiskLevel = "low" | "medium" | "high";
 
 type WalkthroughResponse = {
@@ -693,37 +695,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#05070a] text-white">
-      <nav className="sticky top-0 z-50 border-b border-white/10 bg-black/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <a href="/home" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white">
-              <img
-                src="/branding/walknwow-logo.png"
-                alt="WalkNWow AI logo"
-                className="h-full w-full object-cover"
-              />
-            </span>
-            <span className="text-2xl font-black tracking-tight">
-              WalkNWow<span className="text-cyan-300">.AI</span>
-            </span>
-          </a>
-
-          <div className="hidden items-center gap-7 text-sm text-white/60 md:flex">
-            <a href="#how-it-works" className="transition hover:text-white">How it works</a>
-            <a href="#examples" className="transition hover:text-white">Examples</a>
-            <a href="#pricing" className="transition hover:text-white">Pricing</a>
-            <a href="#contact" className="transition hover:text-white">Contact</a>
-            <a href="/" className="transition hover:text-white">Log in</a>
-          </div>
-
-          <a
-            href="#studio"
-            className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-black transition hover:bg-cyan-100"
-          >
-            Start a video
-          </a>
-        </div>
-      </nav>
+      <SiteNav />
 
       <section className="px-6 py-16">
         <div className="mx-auto max-w-7xl">

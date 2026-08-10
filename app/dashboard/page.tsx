@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import LogoutButton from "@/components/auth/logout-button";
+import SiteNav from "@/components/layout/site-nav";
 import { createClient } from "@/utils/supabase/server";
 
 export default async function DashboardPage() {
@@ -22,29 +22,10 @@ export default async function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-[#05070a] text-white">
-      <nav className="border-b border-white/10 bg-black/60">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link href="/home" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 overflow-hidden rounded-xl bg-white">
-              <img
-                src="/branding/walknwow-logo.png"
-                alt="WalkNWow AI logo"
-                className="h-full w-full object-cover"
-              />
-            </span>
-            <span className="text-2xl font-black">
-              WalkNWow<span className="text-cyan-300">.AI</span>
-            </span>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            <span className="hidden text-sm text-white/40 sm:block">
-              {fullName || user.email}
-            </span>
-            <LogoutButton />
-          </div>
-        </div>
-      </nav>
+      <SiteNav
+        signedIn
+        userLabel={fullName || user.email || ""}
+      />
 
       <div className="mx-auto max-w-7xl px-6 py-10">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
@@ -52,17 +33,19 @@ export default async function DashboardPage() {
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-300">
               Agent workspace
             </p>
+
             <h1 className="mt-2 text-4xl font-black">
               {fullName ? `Welcome, ${fullName}.` : "Your WalkNWow dashboard."}
             </h1>
+
             <p className="mt-3 text-white/45">
-              Projects, past videos, branding, membership and billing will live here.
+              Projects, past videos, branding, membership and billing live here.
             </p>
           </div>
 
           <Link
             href="/home#studio"
-            className="rounded-xl bg-cyan-300 px-5 py-3 text-center font-bold text-black"
+            className="rounded-xl bg-cyan-300 px-5 py-3 text-center font-bold text-black hover:bg-cyan-200"
           >
             + New Project
           </Link>
@@ -86,22 +69,30 @@ export default async function DashboardPage() {
         </div>
 
         <div className="mt-6 grid gap-6 xl:grid-cols-2">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-7">
+          <div
+            id="videos"
+            className="scroll-mt-32 rounded-3xl border border-white/10 bg-white/[0.035] p-7"
+          >
             <h2 className="text-xl font-bold">Past videos</h2>
             <p className="mt-2 text-sm text-white/40">
               Finished purchases will appear here with preview, property address,
               package, date and download.
             </p>
+
             <div className="mt-6 rounded-2xl border border-dashed border-white/15 p-10 text-center text-sm text-white/30">
               No completed videos yet.
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-7">
+          <div
+            id="profile"
+            className="scroll-mt-32 rounded-3xl border border-white/10 bg-white/[0.035] p-7"
+          >
             <h2 className="text-xl font-bold">Agent profile</h2>
             <p className="mt-2 text-sm text-white/40">
               Your saved headshot and contact information will power every closing card.
             </p>
+
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               {[
                 "Headshot",
@@ -123,14 +114,20 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-7">
+          <div
+            id="brokerage"
+            className="scroll-mt-32 rounded-3xl border border-white/10 bg-white/[0.035] p-7"
+          >
             <h2 className="text-xl font-bold">Brokerage information</h2>
             <p className="mt-2 text-sm text-white/40">
               Company name, logo, office details and website will be saved to your account.
             </p>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-7">
+          <div
+            id="billing"
+            className="scroll-mt-32 rounded-3xl border border-white/10 bg-white/[0.035] p-7"
+          >
             <h2 className="text-xl font-bold">Membership & billing</h2>
             <p className="mt-2 text-sm text-white/40">
               Stripe will handle plans, cards, bank payments, invoices, purchases and upgrades.
