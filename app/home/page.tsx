@@ -781,6 +781,7 @@ export default function Home() {
                   <video
                     src="/examples/dottie-polak-5-indian-plantation-st.mp4"
                     controls
+                    muted
                     playsInline
                     preload="metadata"
                     className="aspect-video h-full w-full bg-black object-contain"
@@ -1193,6 +1194,7 @@ export default function Home() {
                           <video
                             src={clip.videoUrl}
                             controls
+                            muted
                             playsInline
                             className="mt-3 aspect-video w-full rounded-xl bg-black object-cover"
                           />
