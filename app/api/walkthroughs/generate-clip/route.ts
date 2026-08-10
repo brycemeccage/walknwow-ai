@@ -366,9 +366,35 @@ export async function POST(
         950
       );
 
-    const motionAmount =
+    const normalizedCategory =
+      category.toLowerCase();
+
+    const normalizedRoomLabel =
+      roomLabel.toLowerCase();
+
+    const isKitchen =
+      /kitchen|breakfast|pantry/.test(
+        `${normalizedCategory} ${normalizedRoomLabel}`
+      );
+
+    const isBedroom =
+      /bedroom|primary suite|master suite/.test(
+        `${normalizedCategory} ${normalizedRoomLabel}`
+      );
+
+    const isOpenPlan =
+      /open concept|open-plan|open plan|great room|living kitchen|kitchen living/.test(
+        `${normalizedCategory} ${normalizedRoomLabel} ${visibleFeatures.join(" ").toLowerCase()}`
+      );
+
+    const isHighRisk =
       scene.distortionRisk === "high" ||
-      scene.blurRisk === "high"
+      scene.blurRisk === "high" ||
+      isKitchen ||
+      isOpenPlan;
+
+    const motionAmount =
+      isHighRisk
         ? "micro"
         : "subtle";
 
@@ -376,19 +402,24 @@ export async function POST(
      * REALISM-FIRST CAMERA POLICY
      *
      * The source photograph is a 2D observation, not a complete 3D world.
-     * We intentionally prefer a smaller believable move over a larger move
-     * that forces the video model to invent unseen geometry.
+     * Prefer a smaller believable move over a larger move that forces the
+     * video model to invent unseen geometry.
      */
     const cameraRule =
       motionAmount === "micro"
-        ? "REALISM CAMERA: use an extremely small stabilized push-in, approximately 1-2 percent of visible scene depth. Create only gentle parallax from surfaces that are already fully visible in the source image. If safe parallax is not possible, use an almost-static stabilized hold with tiny natural camera drift."
-        : "REALISM CAMERA: use a very small stabilized push-in, approximately 2-3 percent of visible scene depth. Create only gentle parallax from surfaces that are already fully visible in the source image. Prefer less movement over any invented geometry. If the move approaches an occlusion or unknown area, immediately stop forward travel.";
+        ? "REALISM CAMERA: use an extremely small stabilized push-in, approximately 1 percent of visible scene depth. Create only gentle parallax from surfaces already fully visible in the source image. If safe parallax is not possible, use an almost-static stabilized hold with tiny natural camera drift. Do not force forward motion."
+        : "REALISM CAMERA: use a very small stabilized push-in, approximately 1-2 percent of visible scene depth. Create only gentle parallax from surfaces already fully visible in the source image. Prefer less movement over any invented geometry. If the move approaches an occlusion, crop edge, doorway, corner, or unknown area, immediately stop forward travel.";
 
     const sourceBoundaryRule =
       "ABSOLUTE 2D SOURCE BOUNDARY: treat the source photograph as the complete and final visual world. There is NO valid scene information outside the photographed pixels and NO hidden geometry may be inferred. Never reveal pixels that would require seeing farther left, right, above, below, behind, around, through, or beyond anything visible in the source. Never extend the room, exterior, landscape, floor, ceiling, wall, deck, yard, water, sky, or neighboring area beyond what the photograph explicitly shows.";
 
     const occlusionRule =
-      "OCCLUSION LOCK: doorways, halls, openings, corners, wall edges, cabinet edges, furniture edges, railings, trees, foreground objects, frame edges, and cropped objects are hard stopping planes. Never move through them. Never look around them. Never expose their hidden back side. Never complete a cropped object. Never reveal an adjoining room or unseen continuation of a space. What is hidden in the source must remain hidden for the entire clip.";
+      "OCCLUSION LOCK: doorways, halls, openings, corners, wall edges, cabinet edges, island edges, appliance edges, furniture edges, railings, trees, foreground objects, frame edges, and cropped objects are hard stopping planes. Never move through them. Never look around them. Never expose their hidden back side. Never complete a cropped object. Never reveal an adjoining room or unseen continuation of a space. What is hidden in the source must remain hidden for the entire clip.";
+
+    const kitchenRule =
+      isKitchen || isOpenPlan
+        ? "KITCHEN / OPEN-PLAN HARD LOCK: do not interpret any doorway, hallway, island gap, cabinet edge, counter edge, appliance gap, dark opening, reflective surface, or cropped wall as a path into another room. Do not create a new room, pantry, hallway, doorway, cabinet run, wall continuation, appliance, window, or countertop beyond what is visible. Keep the camera nearly stationary if necessary. The kitchen must remain exactly the same finite space shown in the source."
+        : "";
 
     const compositionRule =
       "COMPOSITION LOCK: keep the same overall framing, lens character, perspective, room proportions, horizon, and visible content as the source. The ending frame must still look unmistakably like the same photograph from only a slightly advanced camera position. Do not widen the field of view, zoom out, orbit, pan around a corner, rotate to discover new content, or create a new camera angle.";
@@ -396,27 +427,39 @@ export async function POST(
     const identityRule =
       "PROPERTY IDENTITY LOCK: preserve every visible architectural line, wall, ceiling, floor, window, door, cabinet, countertop, appliance, fixture, furnishing, decor item, reflection, tree trunk, branch, foliage silhouette, grass area, fence, deck, shoreline, water shape, horizon, and exterior view. Preserve exact object count, placement, shape, size, color, material, and texture. Nothing may appear, disappear, move independently, morph, split, merge, restage, redesign, regenerate, or be replaced.";
 
+    const lightingRule =
+      isBedroom
+        ? "BEDROOM LIGHTING LOCK: preserve the exact source exposure, white balance, daylight direction, window brightness, lamp state, shadow placement, color temperature, and contrast. Do not brighten or darken the room over time. Do not turn lamps or fixtures on or off. Do not create moving sunlight, changing window light, glow, flicker, exposure pumping, or cinematic relighting."
+        : "LIGHTING LOCK: preserve the exact source exposure, white balance, daylight direction, window brightness, fixture state, shadow placement, color temperature, and contrast from beginning to end. No lights turning on or off, no exposure ramp, no changing sunlight, no cinematic relighting, no glow changes, and no flicker.";
+
     const temporalRule =
-      "TEMPORAL REALISM: opening, middle, and ending frames must remain equally crisp and structurally consistent. No focus settling, depth-of-field blur, motion smear, texture crawling, shimmer, melting, exposure pumping, geometry breathing, foliage regeneration, or sharpening ramp.";
+      "TEMPORAL REALISM: opening, middle, and ending frames must remain equally crisp and structurally consistent. No focus settling, depth-of-field blur, motion smear, texture crawling, shimmer, melting, geometry breathing, foliage regeneration, exposure pumping, sharpening ramp, or frame-to-frame redesign.";
+
+    const realismRule =
+      "PHOTOREALISM LOCK: preserve natural real-estate photography. Do not beautify, stylize, dramatize, add cinematic haze, change materials, smooth textures, alter reflections, increase saturation, create artificial depth of field, or make the property look newly rendered. The video must look like the original real photograph gently coming to life.";
 
     const negativeRule =
-      "NEVER DO: room extension, doorway traversal, corner reveal, behind-object reveal, new furniture, new architecture, invented windows, invented doors, invented landscape, invented neighboring structures, generated unseen wall/floor/ceiling surfaces, camera orbit, large dolly, wide-angle expansion, zoom-out, Ken Burns pan, or cinematic movement that requires hallucinating new content.";
+      "NEVER DO: room extension, doorway traversal, corner reveal, behind-object reveal, new furniture, new architecture, invented windows, invented doors, invented landscape, invented neighboring structures, generated unseen wall/floor/ceiling surfaces, camera orbit, large dolly, wide-angle expansion, zoom-out, Ken Burns pan, cinematic relighting, or any movement that requires hallucinating new content.";
 
     /*
-     * Put the hard constraints FIRST. Runway prompt length is limited, so
-     * property/story context is appended only after the non-negotiable rules.
+     * Put non-negotiable constraints first because Runway prompt length
+     * is limited. Property/story context is appended only after them.
      */
     const promptText =
       [
         sourceBoundaryRule,
         occlusionRule,
+        kitchenRule,
         cameraRule,
         compositionRule,
         identityRule,
+        lightingRule,
         temporalRule,
+        realismRule,
         negativeRule,
-        baseScenePrompt.slice(0, 180),
+        baseScenePrompt.slice(0, 120),
       ]
+        .filter(Boolean)
         .join(" ")
         .slice(0, 995);
 
